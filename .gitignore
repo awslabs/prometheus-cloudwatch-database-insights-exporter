@@ -1,0 +1,13 @@
+build
+gen
+bin
+go.work
+go.work.sum
+.attach_pid*
+*.tmp
+*.swp
+*.bak
+dbinsights-exporter
+coverage.out
+coverage.html
+config.yml
