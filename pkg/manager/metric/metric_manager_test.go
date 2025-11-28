@@ -44,78 +44,51 @@ func TestNewMetricManager(t *testing.T) {
 	}
 }
 
-func TestCollectMetrics(t *testing.T) {
+func TestGetMetricBatches(t *testing.T) {
 	testCases := []struct {
-		name                string
-		instanceFactory     func() models.Instance
-		mockListResponse    *awspi.ListAvailableResourceMetricsOutput
-		mockGetResponse     *awspi.GetResourceMetricsOutput
-		listError           error
-		getError            error
-		expectedError       error
-		expectedMetricCount int
-		shouldCallList      bool
-		shouldCallGet       bool
+		name             string
+		instanceFactory  func() models.Instance
+		mockListResponse *awspi.ListAvailableResourceMetricsOutput
+		listError        error
+		expectedError    error
+		expectedBatches  int
+		shouldCallList   bool
 	}{
 		{
-			name:                "Collect metrics within MetricsTTL",
-			instanceFactory:     testutils.NewTestInstancePostgreSQL,
-			mockListResponse:    nil,
-			mockGetResponse:     mocks.NewMockPIGetResourceMetricsResponse(),
-			listError:           nil,
-			getError:            nil,
-			expectedError:       nil,
-			expectedMetricCount: 5,
-			shouldCallList:      false,
-			shouldCallGet:       true,
+			name:             "Get metric batches within MetricsTTL",
+			instanceFactory:  testutils.NewTestInstancePostgreSQL,
+			mockListResponse: nil,
+			listError:        nil,
+			expectedError:    nil,
+			expectedBatches:  1,
+			shouldCallList:   false,
 		},
 		{
-			name:                "Collect metrics with expired MetricsTTL",
-			instanceFactory:     testutils.NewTestInstancePostgreSQLExpired,
-			mockListResponse:    mocks.NewMockPIListMetricsResponse(),
-			mockGetResponse:     mocks.NewMockPIGetResourceMetricsResponse(),
-			listError:           nil,
-			getError:            nil,
-			expectedError:       nil,
-			expectedMetricCount: 5,
-			shouldCallList:      true,
-			shouldCallGet:       true,
+			name:             "Get metric batches with expired MetricsTTL",
+			instanceFactory:  testutils.NewTestInstancePostgreSQLExpired,
+			mockListResponse: mocks.NewMockPIListMetricsResponse(),
+			listError:        nil,
+			expectedError:    nil,
+			expectedBatches:  1,
+			shouldCallList:   true,
 		},
 		{
-			name:                "Collect metrics for no MetricsDetails",
-			instanceFactory:     testutils.NewTestInstanceNoMetrics,
-			mockListResponse:    mocks.NewMockPIListMetricsResponse(),
-			mockGetResponse:     mocks.NewMockPIGetResourceMetricsResponse(),
-			listError:           nil,
-			getError:            nil,
-			expectedError:       nil,
-			expectedMetricCount: 5,
-			shouldCallList:      true,
-			shouldCallGet:       true,
+			name:             "Get metric batches for no MetricsDetails",
+			instanceFactory:  testutils.NewTestInstanceNoMetrics,
+			mockListResponse: mocks.NewMockPIListMetricsResponse(),
+			listError:        nil,
+			expectedError:    nil,
+			expectedBatches:  1,
+			shouldCallList:   true,
 		},
 		{
-			name:                "Collect metrics with ListAvailableResourceMetrics error",
-			instanceFactory:     testutils.NewTestInstanceNoMetrics,
-			mockListResponse:    nil,
-			mockGetResponse:     nil,
-			listError:           errors.New("ListAvailableResourceMetrics failed"),
-			getError:            nil,
-			expectedError:       errors.New("ListAvailableResourceMetrics failed"),
-			expectedMetricCount: 0,
-			shouldCallList:      true,
-			shouldCallGet:       false,
-		},
-		{
-			name:                "Collect metrics with GetResourceMetrics error",
-			instanceFactory:     testutils.NewTestInstanceNoMetrics,
-			mockListResponse:    mocks.NewMockPIListMetricsResponse(),
-			mockGetResponse:     nil,
-			listError:           nil,
-			getError:            errors.New("GetResourceMetrics failed"),
-			expectedError:       errors.New("GetResourceMetrics failed"),
-			expectedMetricCount: 0,
-			shouldCallList:      true,
-			shouldCallGet:       true,
+			name:             "Get metric batches with ListAvailableResourceMetrics error",
+			instanceFactory:  testutils.NewTestInstanceNoMetrics,
+			mockListResponse: nil,
+			listError:        errors.New("ListAvailableResourceMetrics failed"),
+			expectedError:    errors.New("ListAvailableResourceMetrics failed"),
+			expectedBatches:  0,
+			shouldCallList:   true,
 		},
 	}
 
@@ -131,14 +104,65 @@ func TestCollectMetrics(t *testing.T) {
 					Return(tc.mockListResponse, tc.listError)
 			}
 
-			if tc.shouldCallGet {
-				mockPI.On("GetResourceMetrics", mock.Anything, instance.ResourceID, mock.Anything).
-					Return(tc.mockGetResponse, tc.getError)
+			batches, err := manager.GetMetricBatches(context.Background(), instance)
+
+			if tc.expectedError != nil {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedError.Error())
+				assert.Nil(t, batches)
+			} else {
+				assert.NoError(t, err)
+				assert.Len(t, batches, tc.expectedBatches)
 			}
+
+			mockPI.AssertExpectations(t)
+		})
+	}
+}
+
+func TestCollectMetricsForBatch(t *testing.T) {
+	testCases := []struct {
+		name                string
+		instanceFactory     func() models.Instance
+		metricsBatch        []string
+		mockGetResponse     *awspi.GetResourceMetricsOutput
+		getError            error
+		expectedError       error
+		expectedMetricCount int
+	}{
+		{
+			name:                "Collect metrics for batch success",
+			instanceFactory:     testutils.NewTestInstancePostgreSQL,
+			metricsBatch:        testutils.TestMetricNamesWithStats,
+			mockGetResponse:     mocks.NewMockPIGetResourceMetricsResponse(),
+			getError:            nil,
+			expectedError:       nil,
+			expectedMetricCount: 5,
+		},
+		{
+			name:                "Collect metrics for batch with GetResourceMetrics error",
+			instanceFactory:     testutils.NewTestInstancePostgreSQL,
+			metricsBatch:        testutils.TestMetricNamesWithStats,
+			mockGetResponse:     nil,
+			getError:            errors.New("GetResourceMetrics failed"),
+			expectedError:       errors.New("GetResourceMetrics failed"),
+			expectedMetricCount: 0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			instance := tc.instanceFactory()
+
+			mockPI := &mocks.MockPIService{}
+			manager := NewMetricManager(mockPI)
+
+			mockPI.On("GetResourceMetrics", mock.Anything, instance.ResourceID, tc.metricsBatch).
+				Return(tc.mockGetResponse, tc.getError)
 
 			ch := make(chan prometheus.Metric, 100)
 
-			err := manager.CollectMetrics(context.Background(), instance, ch)
+			err := manager.CollectMetricsForBatch(context.Background(), instance, tc.metricsBatch, ch)
 
 			if tc.expectedError != nil {
 				assert.Error(t, err)
@@ -158,6 +182,76 @@ func TestCollectMetrics(t *testing.T) {
 			mockPI.AssertExpectations(t)
 		})
 	}
+}
+
+func TestCollectMetricsForBatchWithEmptyResponse(t *testing.T) {
+	testCases := []struct {
+		name                string
+		instanceFactory     func() models.Instance
+		metricsBatch        []string
+		mockGetResponse     *awspi.GetResourceMetricsOutput
+		expectedMetricCount int
+	}{
+		{
+			name:                "Collect metrics for batch with empty response",
+			instanceFactory:     testutils.NewTestInstancePostgreSQL,
+			metricsBatch:        testutils.TestMetricNamesWithStats,
+			mockGetResponse:     mocks.NewMockPIGetResourceMetricsResponseEmpty(),
+			expectedMetricCount: 0,
+		},
+		{
+			name:                "Collect metrics for batch with nil keys",
+			instanceFactory:     testutils.NewTestInstancePostgreSQL,
+			metricsBatch:        testutils.TestMetricNamesWithStats,
+			mockGetResponse:     mocks.NewMockPIGetResourceMetricsResponseWithNilKeys(),
+			expectedMetricCount: 1,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			instance := tc.instanceFactory()
+
+			mockPI := &mocks.MockPIService{}
+			manager := NewMetricManager(mockPI)
+
+			mockPI.On("GetResourceMetrics", mock.Anything, instance.ResourceID, tc.metricsBatch).
+				Return(tc.mockGetResponse, nil)
+
+			ch := make(chan prometheus.Metric, 100)
+
+			err := manager.CollectMetricsForBatch(context.Background(), instance, tc.metricsBatch, ch)
+
+			assert.NoError(t, err)
+
+			close(ch)
+
+			metricCount := 0
+			for range ch {
+				metricCount++
+			}
+			assert.Equal(t, tc.expectedMetricCount, metricCount)
+
+			mockPI.AssertExpectations(t)
+		})
+	}
+}
+
+func TestGetMetricBatchesWithNilMetrics(t *testing.T) {
+	instance := models.Instance{
+		ResourceID: "db-TEST",
+		Engine:     models.PostgreSQL,
+		Metrics:    nil,
+	}
+
+	mockPI := &mocks.MockPIService{}
+	manager := NewMetricManager(mockPI)
+
+	batches, err := manager.GetMetricBatches(context.Background(), instance)
+
+	assert.Error(t, err)
+	assert.Nil(t, batches)
+	assert.Contains(t, err.Error(), "Metrics not found")
 }
 
 func TestGetMetrics(t *testing.T) {

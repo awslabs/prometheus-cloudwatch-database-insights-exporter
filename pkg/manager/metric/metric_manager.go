@@ -33,28 +33,27 @@ func NewMetricManager(pi pi.PIService) *MetricManager {
 	}
 }
 
-// CollectMetrics orchestrates complete metric collection for a database instance.
-// This method retrieves or discovers available metrics for the instance and collects current metric data values via the Performance Insights API with batching optimization.
-// It converts collected data to Prometheus format and sends the metrics to the provided channel.
-func (metricManager *MetricManager) CollectMetrics(ctx context.Context, instance models.Instance, ch chan<- prometheus.Metric) error {
+// GetMetricBatches retrieves and batches the metrics for an instance without collecting data.
+// This method is used by the queue-based worker pool to generate all metric batch requests upfront.
+func (metricManager *MetricManager) GetMetricBatches(ctx context.Context, instance models.Instance) ([][]string, error) {
 	metricsList, err := metricManager.getMetrics(ctx, instance.ResourceID, instance.Engine, instance.Metrics)
 	if err != nil {
+		return nil, err
+	}
+
+	return utils.BatchMetricNames(metricsList), nil
+}
+
+// CollectMetricsForBatch collects metric data for a specific batch of metrics for an instance.
+// This method is called by worker goroutines in the queue-based worker pool pattern.
+func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, instance models.Instance, metricsBatch []string, ch chan<- prometheus.Metric) error {
+	metricData, err := metricManager.getMetricData(ctx, instance.ResourceID, metricsBatch)
+	if err != nil {
+		log.Printf("[METRIC MANAGER] Error getting metric data for these metrics: %v, error: %v", metricsBatch, err)
 		return err
 	}
 
-	metricsBatches := utils.BatchMetricNames(metricsList)
-
-	var data []models.MetricData
-	for _, metricsBatch := range metricsBatches {
-		metricData, err := metricManager.getMetricData(ctx, instance.ResourceID, metricsBatch)
-		if err != nil {
-			log.Printf("[METRIC MANAGER] Error getting metric data for these metrics: %v, error: %v", metricsBatch, err)
-			return err
-		}
-		data = append(data, metricData...)
-	}
-
-	for _, metricDatum := range data {
+	for _, metricDatum := range metricData {
 		if err := formatting.ConvertToPrometheusMetric(ch, instance, metricDatum); err != nil {
 			log.Printf("[METRIC MANAGER] Error converting metric data to prometheus metric: %v, error: %v", metricDatum, err)
 			continue

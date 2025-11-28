@@ -13,6 +13,19 @@ import (
 // DefaultMaxConcurrency defines the default maximum number of concurrent metric collection requests
 const DefaultMaxConcurrency = 4
 
+// instanceBatches holds the metric batches for a single instance
+type instanceBatches struct {
+	instance models.Instance
+	batches  [][]string
+	err      error
+}
+
+// metricRequest represents a single metric batch request for an instance
+type metricRequest struct {
+	instance     models.Instance
+	metricsBatch []string
+}
+
 type SingleRegionManager struct {
 	instanceManager instance.InstanceProvider
 	metricManager   metric.MetricProvider
@@ -34,46 +47,21 @@ func NewSingleRegionManager(region string, instanceManager instance.InstanceProv
 
 // CollectMetrics discovers and collects metrics from all eligible database instances in the region.
 // This method discovers all Performance Insights enabled RDS database instances in the region,
-// and collects available Performance Insights metrics on each instance.
+// and collects available Performance Insights metrics on each instance using a queue-based worker pool
+// to parallelize API calls across all metric batches from all instances.
 func (singleRegionManager *SingleRegionManager) CollectMetrics(ctx context.Context, ch chan<- prometheus.Metric) error {
 	instances, err := singleRegionManager.instanceManager.GetInstances(ctx)
 	if err != nil {
 		return err
 	}
 
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(instances))
-	semaphore := make(chan struct{}, singleRegionManager.maxConcurrency)
-
-	for _, instance := range instances {
-		wg.Add(1)
-		go func(inst models.Instance) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }() // Release semaphore
-
-			if err := singleRegionManager.metricManager.CollectMetrics(ctx, inst, ch); err != nil {
-				errChan <- err
-			}
-		}(instance)
-	}
-
-	wg.Wait()
-	close(errChan)
-
-	// Return the first error if any occurred
-	if len(errChan) > 0 {
-		return <-errChan
-	}
-
-	return nil
+	return singleRegionManager.collectMetricsWithQueue(ctx, instances, ch)
 }
 
 // CollectMetricsForInstances discovers and collects metrics from all eligible and specified database instances in the region.
 // This method discovers all Performance Insights enabled RDS database instances in the region that match the provided instance identifiers,
-// and collects available Performance Insights metrics on each instance.
+// and collects available Performance Insights metrics on each instance using a queue-based worker pool
+// to parallelize API calls across all metric batches from all instances.
 func (srm *SingleRegionManager) CollectMetricsForInstances(ctx context.Context, instanceIdentifiers []string, ch chan<- prometheus.Metric) error {
 	allInstances, err := srm.instanceManager.GetInstances(ctx)
 	if err != nil {
@@ -92,31 +80,132 @@ func (srm *SingleRegionManager) CollectMetricsForInstances(ctx context.Context, 
 		}
 	}
 
+	return srm.collectMetricsWithQueue(ctx, filteredInstances, ch)
+}
+
+// fetchMetricBatchesInParallel fetches metric batches for all instances concurrently.
+// This avoids the sequential API call bottleneck on first run when metrics aren't cached.
+// Concurrency is limited by maxConcurrency to avoid overwhelming the API.
+// Returns a slice of results containing instance, batches, and any errors encountered.
+func (srm *SingleRegionManager) fetchMetricBatchesInParallel(ctx context.Context, instances []models.Instance) []instanceBatches {
+	results := make([]instanceBatches, len(instances))
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(filteredInstances))
+
+	// Semaphore to limit concurrent API calls
 	semaphore := make(chan struct{}, srm.maxConcurrency)
 
-	for _, instance := range filteredInstances {
+	for i, inst := range instances {
 		wg.Add(1)
-		go func(inst models.Instance) {
+		go func(index int, instance models.Instance) {
 			defer wg.Done()
 
 			// Acquire semaphore
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }() // Release semaphore
-
-			if err := srm.metricManager.CollectMetrics(ctx, inst, ch); err != nil {
-				errChan <- err
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }() // Release semaphore
+			case <-ctx.Done():
+				results[index] = instanceBatches{
+					instance: instance,
+					err:      ctx.Err(),
+				}
+				return
 			}
-		}(instance)
+
+			batches, err := srm.metricManager.GetMetricBatches(ctx, instance)
+			results[index] = instanceBatches{
+				instance: instance,
+				batches:  batches,
+				err:      err,
+			}
+		}(i, inst)
 	}
 
 	wg.Wait()
-	close(errChan)
+	return results
+}
+
+// collectMetricsWithQueue implements a queue-based worker pool pattern to parallelize
+// metric data collection across all instances and their metric batches.
+// This allows for better parallelization even when there's only a single instance with many metrics.
+// Uses a bounded queue with producer goroutine to balance memory usage and performance.
+// Continues processing on errors and collects all errors to report at the end.
+func (srm *SingleRegionManager) collectMetricsWithQueue(ctx context.Context, instances []models.Instance, ch chan<- prometheus.Metric) error {
+	// Fetch metric batches for all instances in parallel
+	batchResults := srm.fetchMetricBatchesInParallel(ctx, instances)
+
+	// Use a bounded queue to limit memory usage
+	// Size = workers * 10 provides good balance between memory and throughput
+	queueSize := srm.maxConcurrency * 10
+	requestQueue := make(chan metricRequest, queueSize)
+
+	// Error slice to collect all errors (protected by mutex)
+	var errorsMu sync.Mutex
+	var errors []error
+
+	// WaitGroup for workers
+	var workerWg sync.WaitGroup
+
+	// Start worker pool
+	for i := 0; i < srm.maxConcurrency; i++ {
+		workerWg.Add(1)
+		go func() {
+			defer workerWg.Done()
+			for {
+				select {
+				case req, ok := <-requestQueue:
+					if !ok {
+						return // Channel closed
+					}
+					if err := srm.metricManager.CollectMetricsForBatch(ctx, req.instance, req.metricsBatch, ch); err != nil {
+						errorsMu.Lock()
+						errors = append(errors, err)
+						errorsMu.Unlock()
+					}
+				case <-ctx.Done():
+					return // Context cancelled - exit immediately
+				}
+			}
+		}()
+	}
+
+	// Producer goroutine: feeds the queue from fetched batches
+	var producerWg sync.WaitGroup
+	producerWg.Add(1)
+	go func() {
+		defer producerWg.Done()
+		defer close(requestQueue)
+
+		for _, result := range batchResults {
+			if result.err != nil {
+				errorsMu.Lock()
+				errors = append(errors, result.err)
+				errorsMu.Unlock()
+				continue
+			}
+
+			// Queue all batches for this instance
+			for _, batch := range result.batches {
+				select {
+				case requestQueue <- metricRequest{
+					instance:     result.instance,
+					metricsBatch: batch,
+				}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	// Wait for producer to finish
+	producerWg.Wait()
+
+	// Wait for all workers to complete
+	workerWg.Wait()
 
 	// Return the first error if any occurred
-	if len(errChan) > 0 {
-		return <-errChan
+	if len(errors) > 0 {
+		return errors[0]
 	}
 
 	return nil

@@ -39,7 +39,15 @@ type MockMetricProvider struct {
 	mock.Mock
 }
 
-func (mockMetricProvider *MockMetricProvider) CollectMetrics(ctx context.Context, instance models.Instance, ch chan<- prometheus.Metric) error {
-	args := mockMetricProvider.Called(ctx, instance, ch)
+func (mockMetricProvider *MockMetricProvider) GetMetricBatches(ctx context.Context, instance models.Instance) ([][]string, error) {
+	args := mockMetricProvider.Called(ctx, instance)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([][]string), args.Error(1)
+}
+
+func (mockMetricProvider *MockMetricProvider) CollectMetricsForBatch(ctx context.Context, instance models.Instance, metricsBatch []string, ch chan<- prometheus.Metric) error {
+	args := mockMetricProvider.Called(ctx, instance, metricsBatch, ch)
 	return args.Error(0)
 }

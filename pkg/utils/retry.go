@@ -19,7 +19,8 @@ func WithRetry[T any](ctx context.Context, operation func() (T, error), maxRetri
 			return result, err
 		}
 
-		delay := baseDelay * time.Duration(1<<attempt)
+		nextDelay := min(1<<attempt, 5)
+		delay := baseDelay * time.Duration(nextDelay)
 		select {
 		case <-ctx.Done():
 			return result, ctx.Err()

@@ -8,5 +8,6 @@ import (
 )
 
 type MetricProvider interface {
-	CollectMetrics(ctx context.Context, instance models.Instance, ch chan<- prometheus.Metric) error
+	GetMetricBatches(ctx context.Context, instance models.Instance) ([][]string, error)
+	CollectMetricsForBatch(ctx context.Context, instance models.Instance, metricsBatch []string, ch chan<- prometheus.Metric) error
 }
