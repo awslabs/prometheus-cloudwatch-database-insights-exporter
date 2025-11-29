@@ -36,7 +36,7 @@ func TestNewMetricManager(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			manager := NewMetricManager(tc.mockPiService)
+			manager, _ := NewMetricManager(tc.mockPiService, testutils.CreateDefaultParsedTestConfig())
 
 			assert.NotNil(t, manager)
 			assert.Equal(t, tc.mockPiService, manager.piService)
@@ -97,7 +97,7 @@ func TestGetMetricBatches(t *testing.T) {
 			instance := tc.instanceFactory()
 
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			if tc.shouldCallList {
 				mockPI.On("ListAvailableResourceMetrics", mock.Anything, instance.ResourceID).
@@ -155,7 +155,7 @@ func TestCollectMetricsForBatch(t *testing.T) {
 			instance := tc.instanceFactory()
 
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			mockPI.On("GetResourceMetrics", mock.Anything, instance.ResourceID, tc.metricsBatch).
 				Return(tc.mockGetResponse, tc.getError)
@@ -213,7 +213,7 @@ func TestCollectMetricsForBatchWithEmptyResponse(t *testing.T) {
 			instance := tc.instanceFactory()
 
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			mockPI.On("GetResourceMetrics", mock.Anything, instance.ResourceID, tc.metricsBatch).
 				Return(tc.mockGetResponse, nil)
@@ -245,7 +245,7 @@ func TestGetMetricBatchesWithNilMetrics(t *testing.T) {
 	}
 
 	mockPI := &mocks.MockPIService{}
-	manager := NewMetricManager(mockPI)
+	manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 	batches, err := manager.GetMetricBatches(context.Background(), instance)
 
@@ -292,7 +292,7 @@ func TestGetMetrics(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			if tc.shouldCallAPI {
 				mockPI.On("ListAvailableResourceMetrics", mock.Anything, tc.resourceID).
@@ -341,7 +341,7 @@ func TestGetAvailableMetrics(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			mockPI.On("ListAvailableResourceMetrics", mock.Anything, tc.resourceID).
 				Return(tc.mockResponse, tc.expectedError)
@@ -414,7 +414,7 @@ func TestGetMetricData(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			mockPI.On("GetResourceMetrics", mock.Anything, tc.resourceID, tc.metricNames).
 				Return(tc.mockResponse, tc.expectedError)
@@ -466,7 +466,7 @@ func TestFilterLatestValidMetricData(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			filtered := manager.filterLatestValidMetricData(tc.mockResponse)
 
@@ -642,7 +642,7 @@ func TestGetLatestValidDataPoint(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockPI := &mocks.MockPIService{}
-			manager := NewMetricManager(mockPI)
+			manager, _ := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig())
 
 			result := manager.getLatestValidDataPoint(tc.dataPoints)
 

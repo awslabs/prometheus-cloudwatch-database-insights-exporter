@@ -22,15 +22,22 @@ const (
 )
 
 type MetricManager struct {
-	piService pi.PIService
+	piService     pi.PIService
+	configuration *models.ParsedConfig
+	registry      *utils.PerEngineMetricRegistry
 }
 
 // MetricManager handles Performance Insights metric collection and caching for database instances.
 // It coordinates between metric discovery and data collection to provide comprehensive database performance monitoring with efficient AWS API usage.
-func NewMetricManager(pi pi.PIService) *MetricManager {
-	return &MetricManager{
-		piService: pi,
+func NewMetricManager(pi pi.PIService, config *models.ParsedConfig) (*MetricManager, error) {
+	if config == nil {
+		return nil, fmt.Errorf("configuration parameter cannot be nil")
 	}
+	return &MetricManager{
+		piService:     pi,
+		configuration: config,
+		registry:      utils.NewPerEngineMetricRegistry(),
+	}, nil
 }
 
 // GetMetricBatches retrieves and batches the metrics for an instance without collecting data.
@@ -41,7 +48,7 @@ func (metricManager *MetricManager) GetMetricBatches(ctx context.Context, instan
 		return nil, err
 	}
 
-	return utils.BatchMetricNames(metricsList), nil
+	return utils.BatchMetricNames(metricsList, utils.BatchSize), nil
 }
 
 // CollectMetricsForBatch collects metric data for a specific batch of metrics for an instance.
@@ -54,7 +61,7 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 	}
 
 	for _, metricDatum := range metricData {
-		if err := formatting.ConvertToPrometheusMetric(ch, instance, metricDatum); err != nil {
+		if err := formatting.ConvertToPrometheusMetric(ch, instance, metricDatum, metricManager.configuration.Export.Prometheus.MetricPrefix); err != nil {
 			log.Printf("[METRIC MANAGER] Error converting metric data to prometheus metric: %v, error: %v", metricDatum, err)
 			continue
 		}
@@ -68,14 +75,24 @@ func (metricManager *MetricManager) getMetrics(ctx context.Context, resourceID s
 		return nil, fmt.Errorf("[METRIC MANAGER] Metrics not found for instance: %s", resourceID)
 	}
 
-	if metrics.MetricsDetails == nil || metrics.MetricsLastUpdated.IsZero() || time.Now().After(metrics.MetricsLastUpdated.Add(metrics.MetricsTTL)) {
+	if metrics.MetricsDetails == nil || metrics.MetricsLastUpdated.IsZero() || time.Now().After(metrics.MetricsLastUpdated.Add(metrics.MetadataTTL)) {
 		availableMetrics, err := metricManager.getAvailableMetrics(ctx, resourceID, engine)
 		if err != nil {
 			return nil, err
 		}
 
-		metrics.MetricsDetails = availableMetrics
-		metrics.MetricsList = utils.GetMetricNamesWithStatistic(availableMetrics)
+		filteredMetrics := make(map[string]models.MetricDetails)
+		metricConfig := metricManager.configuration.Discovery.Metrics
+		for metricName, metric := range availableMetrics {
+			if metricConfig.ShouldIncludeMetric(metric) {
+				filteredMetrics[metricName] = metric
+			}
+		}
+
+		filteredMetricList := utils.GetMetricNamesWithStatistic(filteredMetrics)
+
+		metrics.MetricsDetails = filteredMetrics
+		metrics.MetricsList = filteredMetricList
 		metrics.MetricsLastUpdated = time.Now()
 	}
 	return metrics.MetricsList, nil
@@ -89,7 +106,7 @@ func (metricManager *MetricManager) getAvailableMetrics(ctx context.Context, res
 		return nil, err
 	}
 
-	return utils.BuildMetricDefinitionMap(availableMetrics.Metrics, nil, engine)
+	return utils.BuildMetricDefinitionMap(availableMetrics.Metrics, &metricManager.configuration.Discovery.Metrics, engine, metricManager.registry)
 }
 
 func (metricManager *MetricManager) getMetricData(ctx context.Context, resourceID string, metricNamesWithStat []string) ([]models.MetricData, error) {

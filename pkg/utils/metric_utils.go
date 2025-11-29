@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -23,8 +24,10 @@ type PerEngineMetricRegistry struct {
 	registries map[models.Engine]*MetricDescriptionRegistry
 }
 
-var globalPerEngineRegistry = &PerEngineMetricRegistry{
-	registries: make(map[models.Engine]*MetricDescriptionRegistry),
+func NewPerEngineMetricRegistry() *PerEngineMetricRegistry {
+	return &PerEngineMetricRegistry{
+		registries: make(map[models.Engine]*MetricDescriptionRegistry),
+	}
 }
 
 func (r *MetricDescriptionRegistry) GetCanonicalDescription(metricName, awsDescription string) string {
@@ -84,18 +87,18 @@ func GetMetricNamesWithStatistic(metricsDefinitionMap map[string]models.MetricDe
 	return metricNamesWithStat
 }
 
-func BuildMetricDefinitionMap(availableMetrics []types.ResponseResourceMetric, metricStatisticConfig *models.MetricStatisticConfig, engine models.Engine) (map[string]models.MetricDetails, error) {
+func BuildMetricDefinitionMap(availableMetrics []types.ResponseResourceMetric, metricConfig *models.ParsedMetricsConfig, engine models.Engine, registry *PerEngineMetricRegistry) (map[string]models.MetricDetails, error) {
 	if len(availableMetrics) == 0 {
 		return nil, fmt.Errorf("[METRIC UTILS] NO metrics provided to build")
 	}
 
 	metricDefinitionMap := make(map[string]models.MetricDetails, len(availableMetrics))
-	engineRegistry := globalPerEngineRegistry.GetEngineRegistry(engine)
+	engineRegistry := registry.GetEngineRegistry(engine)
 
 	for _, metric := range availableMetrics {
 		if validResponseResourceMetric(metric) {
 			metricName := *metric.Metric
-			statistics := getMetricStatistics(metricName, metricStatisticConfig)
+			statistics := getMetricStatistics(metricName, metricConfig)
 
 			if len(statistics) > 0 {
 				canonicalDescription := engineRegistry.GetCanonicalDescription(metricName, *metric.Description)
@@ -117,24 +120,130 @@ func validResponseResourceMetric(metric types.ResponseResourceMetric) bool {
 	return metric.Metric != nil && metric.Description != nil && metric.Unit != nil
 }
 
-func getMetricStatistics(metricName string, statisticConfig *models.MetricStatisticConfig) []models.Statistic {
-	var statistics []models.Statistic
-	if statisticConfig != nil {
-		if statisticConfig.Configured != nil {
-			if configuredStatistics, exists := statisticConfig.Configured[metricName]; exists {
-				statistics = append(statistics, configuredStatistics...)
+func getMetricStatistics(metricName string, metricConfig *models.ParsedMetricsConfig) []models.Statistic {
+	if metricConfig == nil {
+		return []models.Statistic{models.StatisticAvg}
+	}
+
+	if shouldExcludeMetric(metricName, metricConfig) {
+		return []models.Statistic{}
+	}
+
+	return determineIncludedStatistics(metricName, metricConfig)
+}
+
+func shouldExcludeMetric(metricName string, metricConfig *models.ParsedMetricsConfig) bool {
+	if len(metricConfig.Exclude) == 0 {
+		return false
+	}
+
+	if namePatterns, exists := metricConfig.Exclude[models.FilterTypeName.String()]; exists {
+		for _, pattern := range namePatterns {
+			if patternMatchesMetric(pattern, metricName) {
+				return true
 			}
 		}
-		statistics = append(statistics, statisticConfig.Default)
-	} else {
-		// Default statistic
-		statistics = append(statistics, models.StatisticAvg)
 	}
+
+	if categoryPatterns, exists := metricConfig.Exclude[models.FilterTypeCategory.String()]; exists {
+		metricCategory := models.DeriveMetricCategory(metricName)
+		for _, pattern := range categoryPatterns {
+			if patternMatchesMetric(pattern, metricCategory) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func determineIncludedStatistics(metricName string, metricConfig *models.ParsedMetricsConfig) []models.Statistic {
+	var statistics []models.Statistic
+	seenStatistics := make(map[models.Statistic]bool)
+
+	statistics = append(statistics, metricConfig.Statistic)
+	seenStatistics[metricConfig.Statistic] = true
+
+	if len(metricConfig.Include) == 0 {
+		return statistics
+	}
+
+	explicitStats := extractExplicitStatisticsFromInclude(metricName, metricConfig.Include)
+	for _, stat := range explicitStats {
+		if !seenStatistics[stat] {
+			statistics = append(statistics, stat)
+			seenStatistics[stat] = true
+		}
+	}
+
+	if matchesIncludePatterns(metricName, metricConfig.Include) {
+		if !seenStatistics[metricConfig.Statistic] {
+			statistics = append(statistics, metricConfig.Statistic)
+			seenStatistics[metricConfig.Statistic] = true
+		}
+	}
+
 	return statistics
 }
 
+func extractExplicitStatisticsFromInclude(metricName string, patterns models.FilterConfig) []models.Statistic {
+	var statistics []models.Statistic
+
+	if namePatterns, exists := patterns[models.FilterTypeName.String()]; exists {
+		for _, pattern := range namePatterns {
+			if basePattern, statisticStr := extractMetricAndStatistic(pattern); basePattern != "" && statisticStr != "" {
+				if patternMatchesMetric(basePattern, metricName) {
+					if stat := models.NewStatistic(statisticStr); stat.IsValid() {
+						statistics = append(statistics, stat)
+					}
+				}
+			}
+		}
+	}
+
+	return statistics
+}
+
+func matchesIncludePatterns(metricName string, patterns models.FilterConfig) bool {
+	if namePatterns, exists := patterns[models.FilterTypeName.String()]; exists {
+		for _, pattern := range namePatterns {
+			if _, statisticStr := extractMetricAndStatistic(pattern); statisticStr != "" {
+				continue
+			}
+			if patternMatchesMetric(pattern, metricName) {
+				return true
+			}
+		}
+	}
+
+	if categoryPatterns, exists := patterns[models.FilterTypeCategory.String()]; exists {
+		metricCategory := models.DeriveMetricCategory(metricName)
+		for _, pattern := range categoryPatterns {
+			if patternMatchesMetric(pattern, metricCategory) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func patternMatchesMetric(pattern, metricName string) bool {
+	if pattern == metricName {
+		return true
+	}
+
+	if isRegexPattern(pattern) {
+		if regex, err := regexp.Compile(pattern); err == nil {
+			return regex.MatchString(metricName)
+		}
+	}
+
+	return false
+}
+
 func TrimStatisticFromMetricName(metricNameWithStat string) string {
-	for _, statistic := range []models.Statistic{models.StatisticAvg, models.StatisticMin, models.StatisticMax, models.StatisticSum} {
+	for _, statistic := range models.GetAllStatistics() {
 		if strings.HasSuffix(metricNameWithStat, "."+statistic.String()) {
 			return strings.TrimSuffix(metricNameWithStat, "."+statistic.String())
 		}

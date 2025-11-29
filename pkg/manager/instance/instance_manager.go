@@ -27,7 +27,7 @@ type RDSInstanceManager struct {
 	Instances            []models.Instance
 	InstancesLastUpdated time.Time
 	InstanceTTL          time.Duration
-	Configuration        *models.ParsedConfig
+	configuration        *models.ParsedConfig
 }
 
 type SafeInstanceFields struct {
@@ -47,14 +47,14 @@ func NewRDSInstanceManager(rds rds.RDSService, config *models.ParsedConfig) (*RD
 	}
 	return &RDSInstanceManager{
 		rdsService:    rds,
-		InstanceTTL:   InstanceTTL,
-		Configuration: config,
+		InstanceTTL:   config.Discovery.Instances.InstanceTTL,
+		configuration: config,
 	}, nil
 }
 
 // GetInstances returns cached database instances, refreshing from AWS if TTL is expired.
 func (instanceManager *RDSInstanceManager) GetInstances(ctx context.Context) ([]models.Instance, error) {
-	if instanceManager.Configuration == nil {
+	if instanceManager.configuration == nil {
 		return nil, fmt.Errorf("configuration cannot be nil")
 	}
 
@@ -65,13 +65,13 @@ func (instanceManager *RDSInstanceManager) GetInstances(ctx context.Context) ([]
 		}
 		log.Printf("[INSTANCE] Discovered %d instances ", len(instances))
 
-		maxInstances := instanceManager.Configuration.Discovery.Instances.MaxInstances
+		maxInstances := instanceManager.configuration.Discovery.Instances.MaxInstances
 		if len(instances) > maxInstances {
 			instanceManager.Instances = instances[:maxInstances]
+			log.Printf("[INSTANCE] Limited to %d instances ", len(instanceManager.Instances))
 		} else {
 			instanceManager.Instances = instances
 		}
-		log.Printf("[INSTANCE] Limited to %d instances ", len(instanceManager.Instances))
 		instanceManager.InstancesLastUpdated = time.Now()
 	}
 
@@ -95,18 +95,30 @@ func (instanceManager *RDSInstanceManager) discoverInstances(ctx context.Context
 			continue
 		}
 
+		var instance models.Instance
 		engine := models.NewEngine(instanceFields.Engine)
-		if instanceFields.DBInstanceStatus == ValidInstanceStatus && instanceFields.PerformanceInsightsEnabled && engine != "" {
-			instances = append(instances, models.Instance{
+		if instanceFields.PerformanceInsightsEnabled && engine != "" {
+			instance = models.Instance{
 				ResourceID:   instanceFields.DbiResourceId,
 				Identifier:   instanceFields.DBInstanceIdentifier,
 				Engine:       engine,
 				CreationTime: instanceFields.InstanceCreateTime,
 				Metrics: &models.Metrics{
-					MetricsTTL: MetricsTTL,
+					MetadataTTL: instanceManager.configuration.Discovery.Metrics.MetadataTTL,
 				},
-			})
+			}
 		}
+
+		instanceConfig := instanceManager.configuration.Discovery.Instances
+		if !instanceConfig.ShouldIncludeInstance(instance) {
+			continue
+		}
+
+		if instance.ResourceID == "" || instance.Identifier == "" {
+			continue
+		}
+
+		instances = append(instances, instance)
 	}
 
 	sort.Slice(instances, func(i, j int) bool {

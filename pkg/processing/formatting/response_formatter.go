@@ -10,7 +10,7 @@ import (
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/utils"
 )
 
-func ConvertToPrometheusMetric(ch chan<- prometheus.Metric, instance models.Instance, metricData models.MetricData) error {
+func ConvertToPrometheusMetric(ch chan<- prometheus.Metric, instance models.Instance, metricData models.MetricData, metricPrefix string) error {
 
 	metricName := utils.TrimStatisticFromMetricName(metricData.Metric)
 	if metricName == "" {
@@ -25,7 +25,7 @@ func ConvertToPrometheusMetric(ch chan<- prometheus.Metric, instance models.Inst
 
 	engineShortStr := utils.EngineToShortName(instance.Engine)
 	prometheusDesc := buildPrometheusDescription(
-		buildPrometheusMetricName(metricData.Metric, engineShortStr),
+		buildPrometheusMetricName(metricPrefix, engineShortStr, metricData.Metric),
 		metric.Description,
 		metricLabels,
 	)
@@ -72,10 +72,9 @@ func buildPrometheusDescription(metricNameWithStat string, metricDescription str
 	)
 }
 
-func buildPrometheusMetricName(metricWithStatistic string, engineShortStr string) string {
-	prefix := "dbi_"
+func buildPrometheusMetricName(metricPrefix string, engineShortStr string, metricWithStatistic string) string {
 	if strings.HasPrefix(metricWithStatistic, "db.") {
-		prefix = prefix + engineShortStr + "_"
+		metricPrefix = metricPrefix + "_" + engineShortStr
 	}
-	return prefix + utils.SnakeCase(metricWithStatistic)
+	return metricPrefix + "_" + utils.SnakeCase(metricWithStatistic)
 }

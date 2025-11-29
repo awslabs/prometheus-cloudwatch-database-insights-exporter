@@ -16,7 +16,7 @@ func TestConvertToPrometheusMetric(t *testing.T) {
 			t.Run(metricData.Metric, func(t *testing.T) {
 				ch := make(chan prometheus.Metric, 1)
 
-				err := ConvertToPrometheusMetric(ch, testutils.TestInstancePostgreSQL, metricData)
+				err := ConvertToPrometheusMetric(ch, testutils.TestInstancePostgreSQL, metricData, "dbi")
 				assert.NoError(t, err)
 
 				select {
@@ -34,7 +34,7 @@ func TestConvertToPrometheusMetric(t *testing.T) {
 		dbMetric := testutils.NewTestMetricData("db.User.max_connections.avg", 100.0)
 		ch := make(chan prometheus.Metric, 1)
 
-		err := ConvertToPrometheusMetric(ch, testutils.TestInstancePostgreSQL, dbMetric)
+		err := ConvertToPrometheusMetric(ch, testutils.TestInstancePostgreSQL, dbMetric, "dbi")
 		assert.NoError(t, err)
 
 		select {
@@ -56,7 +56,7 @@ func TestConvertToPrometheusMetric(t *testing.T) {
 		osMetric := testutils.NewTestMetricData("os.general.numVCPUs.avg", 4.0)
 		ch := make(chan prometheus.Metric, 1)
 
-		err := ConvertToPrometheusMetric(ch, testutils.TestInstancePostgreSQL, osMetric)
+		err := ConvertToPrometheusMetric(ch, testutils.TestInstancePostgreSQL, osMetric, "dbi")
 		assert.NoError(t, err)
 
 		select {
@@ -69,7 +69,7 @@ func TestConvertToPrometheusMetric(t *testing.T) {
 			metricName := desc.String()
 			assert.Contains(t, metricName, "dbi_os_general_numvcpus_avg",
 				"os. metrics should not include engine short name in the metric name")
-			assert.False(t, strings.Contains(metricName, "dbi_pg_os_"),
+			assert.False(t, strings.Contains(metricName, "dbipg_os_"),
 				"os. metrics should not have engine prefix")
 		default:
 			t.Error("Expected a metric to be sent to the channel")
@@ -81,7 +81,7 @@ func TestConvertToPrometheusMetric(t *testing.T) {
 
 		// Test with Aurora PostgreSQL instance (has apg prefix)
 		chPg := make(chan prometheus.Metric, 1)
-		err := ConvertToPrometheusMetric(chPg, testutils.TestInstancePostgreSQL, dbMetric)
+		err := ConvertToPrometheusMetric(chPg, testutils.TestInstancePostgreSQL, dbMetric, "dbi")
 		assert.NoError(t, err)
 
 		metricPg := <-chPg
@@ -93,7 +93,7 @@ func TestConvertToPrometheusMetric(t *testing.T) {
 		// Create a MySQL instance with the full metrics details
 		mysqlInstance := testutils.NewTestInstance("db-TESTMYSQL", "test-mysql-db", testutils.TestEngineMySQL)
 		chMysql := make(chan prometheus.Metric, 1)
-		err = ConvertToPrometheusMetric(chMysql, mysqlInstance, dbMetric)
+		err = ConvertToPrometheusMetric(chMysql, mysqlInstance, dbMetric, "dbi")
 		assert.NoError(t, err)
 
 		metricMysql := <-chMysql
@@ -205,7 +205,7 @@ func TestBuildPrometheusMetricName(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := buildPrometheusMetricName(tc.input, tc.engineShortStr)
+			result := buildPrometheusMetricName("dbi", tc.engineShortStr, tc.input)
 			assert.Equal(t, tc.expected, result)
 		})
 	}

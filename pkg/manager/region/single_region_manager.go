@@ -10,9 +10,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// DefaultMaxConcurrency defines the default maximum number of concurrent metric collection requests
-const DefaultMaxConcurrency = 4
-
 // instanceBatches holds the metric batches for a single instance
 type instanceBatches struct {
 	instance models.Instance
@@ -36,12 +33,12 @@ type SingleRegionManager struct {
 // SingleRegionManager handles the database metric collection within a single AWS region.
 // It coordiantes between instance discovery (via RDS) and metric collection (via Performance Insights)
 // to provide comprehensive database monitoring for all eligible instances in the region.
-func NewSingleRegionManager(region string, instanceManager instance.InstanceProvider, metricManager metric.MetricProvider) *SingleRegionManager {
+func NewSingleRegionManager(region string, instanceManager instance.InstanceProvider, metricManager metric.MetricProvider, concurrency int) *SingleRegionManager {
 	return &SingleRegionManager{
 		instanceManager: instanceManager,
 		metricManager:   metricManager,
 		region:          region,
-		maxConcurrency:  DefaultMaxConcurrency,
+		maxConcurrency:  concurrency,
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/models"
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/testutils"
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/testutils/mocks"
+	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/utils"
 )
 
 func TestNewSingleRegionManager(t *testing.T) {
@@ -20,12 +21,14 @@ func TestNewSingleRegionManager(t *testing.T) {
 		mockMetricProvider := &mocks.MockMetricProvider{}
 		region := "us-west-2"
 
-		manager := NewSingleRegionManager(region, mockInstanceProvider, mockMetricProvider)
+		concurrency := utils.DefaultConcurrency
+		manager := NewSingleRegionManager(region, mockInstanceProvider, mockMetricProvider, concurrency)
 
 		assert.NotNil(t, manager)
 		assert.Equal(t, region, manager.region)
 		assert.Equal(t, mockInstanceProvider, manager.instanceManager)
 		assert.Equal(t, mockMetricProvider, manager.metricManager)
+		assert.Equal(t, concurrency, manager.maxConcurrency)
 	})
 }
 
@@ -99,7 +102,7 @@ func TestCollectMetrics(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mockIP := &mocks.MockInstanceProvider{}
 			mockMP := &mocks.MockMetricProvider{}
-			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP)
+			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP, utils.DefaultConcurrency)
 
 			if tc.shouldCallGetInstances {
 				mockIP.On("GetInstances", mock.Anything).
@@ -250,7 +253,7 @@ func TestCollectMetricsForInstances(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mockIP := &mocks.MockInstanceProvider{}
 			mockMP := &mocks.MockMetricProvider{}
-			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP)
+			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP, utils.DefaultConcurrency)
 
 			if tc.shouldCallGetInstances {
 				mockIP.On("GetInstances", mock.Anything).
@@ -412,7 +415,7 @@ func TestCollectMetricsWithQueue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mockIP := &mocks.MockInstanceProvider{}
 			mockMP := &mocks.MockMetricProvider{}
-			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP)
+			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP, utils.DefaultConcurrency)
 
 			mockIP.On("GetInstances", mock.Anything).
 				Return(tc.instances, nil)
@@ -578,8 +581,7 @@ func TestFetchMetricBatchesInParallel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mockIP := &mocks.MockInstanceProvider{}
 			mockMP := &mocks.MockMetricProvider{}
-			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP)
-			manager.maxConcurrency = tc.maxConcurrency
+			manager := NewSingleRegionManager("us-west-2", mockIP, mockMP, tc.maxConcurrency)
 
 			// Set up GetMetricBatches expectations
 			for i, instance := range tc.instances {
@@ -626,16 +628,16 @@ func TestFetchMetricBatchesInParallelContextCancellation(t *testing.T) {
 	t.Run("context cancelled before API calls", func(t *testing.T) {
 		mockIP := &mocks.MockInstanceProvider{}
 		mockMP := &mocks.MockMetricProvider{}
-		manager := NewSingleRegionManager("us-west-2", mockIP, mockMP)
+		manager := NewSingleRegionManager("us-west-2", mockIP, mockMP, utils.DefaultConcurrency)
 
 		instances := []models.Instance{
 			testutils.TestInstancePostgreSQL,
 			testutils.TestInstanceMySQL,
 		}
 
-		// Mock may or may not be called depending on timing
+		// Mock returns context.Canceled error when context is cancelled
 		mockMP.On("GetMetricBatches", mock.Anything, mock.Anything).
-			Return([][]string{{"metric1"}}, nil).Maybe()
+			Return([][]string{}, context.Canceled).Maybe()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel() // Cancel immediately
@@ -645,22 +647,19 @@ func TestFetchMetricBatchesInParallelContextCancellation(t *testing.T) {
 		// Should return results for all instances
 		assert.Equal(t, len(instances), len(results))
 
-		// At least some should have context.Canceled error
-		hasContextError := false
+		// All should have context.Canceled error since context was cancelled before execution
 		for _, result := range results {
-			if result.err != nil && errors.Is(result.err, context.Canceled) {
-				hasContextError = true
-				break
+			if result.err != nil {
+				assert.True(t, errors.Is(result.err, context.Canceled),
+					"Expected context.Canceled error, got: %v", result.err)
 			}
 		}
-		assert.True(t, hasContextError, "Expected at least one context cancellation error")
 	})
 
 	t.Run("context cancelled during API calls", func(t *testing.T) {
 		mockIP := &mocks.MockInstanceProvider{}
 		mockMP := &mocks.MockMetricProvider{}
-		manager := NewSingleRegionManager("us-west-2", mockIP, mockMP)
-		manager.maxConcurrency = 1 // Force sequential processing
+		manager := NewSingleRegionManager("us-west-2", mockIP, mockMP, 1)
 
 		instances := []models.Instance{
 			testutils.TestInstancePostgreSQL,
@@ -700,8 +699,7 @@ func TestFetchMetricBatchesInParallelConcurrencyLimit(t *testing.T) {
 	t.Run("respects maxConcurrency limit", func(t *testing.T) {
 		mockIP := &mocks.MockInstanceProvider{}
 		mockMP := &mocks.MockMetricProvider{}
-		manager := NewSingleRegionManager("us-west-2", mockIP, mockMP)
-		manager.maxConcurrency = 2 // Limit to 2 concurrent calls
+		manager := NewSingleRegionManager("us-west-2", mockIP, mockMP, 2)
 
 		// Create unique instances to avoid mock confusion
 		instances := []models.Instance{

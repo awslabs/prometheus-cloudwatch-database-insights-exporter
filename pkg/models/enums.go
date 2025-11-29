@@ -80,3 +80,31 @@ func (statistic Statistic) IsValid() bool {
 		return false
 	}
 }
+
+func GetAllStatistics() []Statistic {
+	return []Statistic{StatisticAvg, StatisticMin, StatisticMax, StatisticSum}
+}
+
+type FilterType string
+
+const (
+	FilterTypeIdentifier FilterType = "identifier"
+	FilterTypeEngine     FilterType = "engine"
+	FilterTypeName       FilterType = "name"
+	FilterTypeCategory   FilterType = "category"
+	FilterTypeUnit       FilterType = "unit"
+	FilterTypeTagPrefix  FilterType = "tag."
+)
+
+func (filterType FilterType) String() string {
+	return string(filterType)
+}
+
+func (filterType FilterType) IsValid() bool {
+	switch filterType {
+	case FilterTypeIdentifier, FilterTypeEngine, FilterTypeName, FilterTypeCategory, FilterTypeUnit:
+		return true
+	default:
+		return strings.HasPrefix(string(filterType), string(FilterTypeTagPrefix))
+	}
+}

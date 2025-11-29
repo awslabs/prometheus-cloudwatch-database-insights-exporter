@@ -49,7 +49,11 @@ func (factory *RegionManagerFactory) createSingleRegionManager(region string, co
 	if err != nil {
 		return nil, fmt.Errorf("failed to create RDS instance manager: %w", err)
 	}
-	metricManager := metric.NewMetricManager(piClient)
 
-	return NewSingleRegionManager(region, rdsInstanceManager, metricManager), nil
+	metricManager, err := metric.NewMetricManager(piClient, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metric manager: %w", err)
+	}
+
+	return NewSingleRegionManager(region, rdsInstanceManager, metricManager, config.Discovery.Processing.Concurrency), nil
 }

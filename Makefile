@@ -1,6 +1,4 @@
-include ${BGO_MAKEFILE}
-
-.PHONY: format lint test check clean help
+.PHONY: build run format lint test check clean help
 
 # Format code using go fmt
 format:
@@ -28,21 +26,33 @@ coverage-html: coverage-profile
 	@echo "Open coverage.html in your browser"
 
 # Run basic checks
-check: format lint coverage
+check: build format lint coverage
 	@echo "All checks passed!"
 
 # Clean build artifacts
-dbi-clean:
+clean:
 	@echo "Cleaning build artifacts..."
 	rm -rf build/
 	rm -f coverage.out coverage.html
 	rm -f dbinsights-exporter
 
+# Build
+build:
+	@echo "Building project to dbinsights-exporter..."
+	go build -o dbinsights-exporter ./cmd
+
+# Build and run project
+run: build
+	@echo "Running database insights exporter..."
+	./dbinsights-exporter
+
 # Show available targets
-dbi-help:
+help:
 	@echo "Available targets:"
+	@echo "  build            - Build project"
+	@echo "  run              - Build and Run project"
 	@echo "  format           - Format Go code"
-	@echo "  lint             - Static analysis with go vet"  
+	@echo "  lint             - Static analysis with go vet"
 	@echo "  check            - Format, lint, and test"
 	@echo "  clean            - Clean build artifacts"
 	@echo ""

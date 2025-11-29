@@ -37,7 +37,7 @@ func TestCreateRegionManager(t *testing.T) {
 	}{
 		{
 			name:           "creates multi region manager with single region",
-			config:         testutils.CreateDefaultTestConfig(),
+			config:         testutils.CreateDefaultParsedTestConfig(),
 			expectedType:   "*region.MultiRegionManager",
 			expectedRegion: 1,
 			shouldError:    false,
@@ -51,9 +51,7 @@ func TestCreateRegionManager(t *testing.T) {
 						MaxInstances: testutils.TestMaxInstances,
 					},
 					Metrics: models.ParsedMetricsConfig{
-						Statistic: models.MetricStatisticConfig{
-							Default: models.StatisticAvg,
-						},
+						Statistic: models.StatisticAvg,
 					},
 				},
 				Export: models.ParsedExportConfig{
@@ -73,9 +71,7 @@ func TestCreateRegionManager(t *testing.T) {
 						MaxInstances: testutils.TestMaxInstances,
 					},
 					Metrics: models.ParsedMetricsConfig{
-						Statistic: models.MetricStatisticConfig{
-							Default: models.StatisticAvg,
-						},
+						Statistic: models.StatisticAvg,
 					},
 				},
 				Export: models.ParsedExportConfig{
@@ -88,14 +84,14 @@ func TestCreateRegionManager(t *testing.T) {
 		},
 		{
 			name:           "creates multi region manager with maxInstances",
-			config:         testutils.CreateTestConfig(testutils.TestMaxInstances),
+			config:         testutils.CreateParsedTestConfig(testutils.TestMaxInstances),
 			expectedType:   "*region.MultiRegionManager",
 			expectedRegion: 1,
 			shouldError:    false,
 		},
 		{
 			name:           "creates multi region manager with maxInstances = 1",
-			config:         testutils.CreateTestConfig(1),
+			config:         testutils.CreateParsedTestConfig(1),
 			expectedType:   "*region.MultiRegionManager",
 			expectedRegion: 1,
 			shouldError:    false,
@@ -133,25 +129,25 @@ func TestCreateSingleRegionManager(t *testing.T) {
 		{
 			name:        "creates single region manager for us-west-2",
 			region:      "us-west-2",
-			config:      testutils.CreateDefaultTestConfig(),
+			config:      testutils.CreateDefaultParsedTestConfig(),
 			shouldError: false,
 		},
 		{
 			name:        "creates single region manager for us-east-1",
 			region:      "us-east-1",
-			config:      testutils.CreateDefaultTestConfig(),
+			config:      testutils.CreateDefaultParsedTestConfig(),
 			shouldError: false,
 		},
 		{
 			name:        "creates single region manager with maxInstances",
 			region:      "us-west-2",
-			config:      testutils.CreateTestConfig(testutils.TestMaxInstances),
+			config:      testutils.CreateParsedTestConfig(testutils.TestMaxInstances),
 			shouldError: false,
 		},
 		{
 			name:        "creates single region manager with maxInstances = 1",
 			region:      "eu-west-1",
-			config:      testutils.CreateTestConfig(1),
+			config:      testutils.CreateParsedTestConfig(1),
 			shouldError: false,
 		},
 	}

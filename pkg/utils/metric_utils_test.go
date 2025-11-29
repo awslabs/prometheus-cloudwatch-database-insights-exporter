@@ -424,23 +424,23 @@ func TestResetEngineRegistry(t *testing.T) {
 
 func TestBuildMetricDefinitionMap(t *testing.T) {
 	testCases := []struct {
-		name                  string
-		resetGlobalRegistry   bool
-		engine                models.Engine
-		availableMetrics      []types.ResponseResourceMetric
-		metricStatisticConfig *models.MetricStatisticConfig
-		expectedError         bool
-		expectedCount         int
-		validateResults       func(*testing.T, map[string]models.MetricDetails)
+		name                string
+		resetGlobalRegistry bool
+		engine              models.Engine
+		availableMetrics    []types.ResponseResourceMetric
+		metricConfig        *models.ParsedMetricsConfig
+		expectedError       bool
+		expectedCount       int
+		validateResults     func(*testing.T, map[string]models.MetricDetails)
 	}{
 		{
-			name:                  "basic - valid metrics with nil config",
-			resetGlobalRegistry:   true,
-			engine:                models.PostgreSQL,
-			availableMetrics:      mocks.NewMockPIListMetricsResponse().Metrics,
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         5,
+			name:                "basic - valid metrics with nil config",
+			resetGlobalRegistry: true,
+			engine:              models.PostgreSQL,
+			availableMetrics:    mocks.NewMockPIListMetricsResponse().Metrics,
+			metricConfig:        nil,
+			expectedError:       false,
+			expectedCount:       5,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
 				for metricName, metricDetails := range result {
 					assert.Equal(t, metricName, metricDetails.Name)
@@ -451,22 +451,22 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 			},
 		},
 		{
-			name:                  "basic - empty metrics returns error",
-			resetGlobalRegistry:   true,
-			engine:                models.MySQL,
-			availableMetrics:      []types.ResponseResourceMetric{},
-			metricStatisticConfig: nil,
-			expectedError:         true,
-			expectedCount:         0,
-			validateResults:       nil,
+			name:                "basic - empty metrics returns error",
+			resetGlobalRegistry: true,
+			engine:              models.MySQL,
+			availableMetrics:    []types.ResponseResourceMetric{},
+			metricConfig:        nil,
+			expectedError:       true,
+			expectedCount:       0,
+			validateResults:     nil,
 		},
 		{
-			name:                "basic - valid metrics with default statistic config",
+			name:                "basic - valid metrics with max statistic config",
 			resetGlobalRegistry: true,
 			engine:              models.AuroraPostgreSQL,
 			availableMetrics:    mocks.NewMockPIListMetricsResponse().Metrics,
-			metricStatisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticMax,
+			metricConfig: &models.ParsedMetricsConfig{
+				Statistic: models.StatisticMax,
 			},
 			expectedError: false,
 			expectedCount: 5,
@@ -477,21 +477,18 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 			},
 		},
 		{
-			name:                "basic - configured statistics for specific metrics",
+			name:                "basic - default avg statistic when no specific patterns match",
 			resetGlobalRegistry: true,
 			engine:              models.AuroraMySQL,
 			availableMetrics:    mocks.NewMockPIListMetricsResponse().Metrics,
-			metricStatisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticAvg,
-				Configured: map[string][]models.Statistic{
-					"os.general.numVCPUs": {models.StatisticMin, models.StatisticMax},
-				},
+			metricConfig: &models.ParsedMetricsConfig{
+				Statistic: models.StatisticAvg,
 			},
 			expectedError: false,
 			expectedCount: 5,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
-				if metric, exists := result["os.general.numVCPUs"]; exists {
-					assert.Len(t, metric.Statistics, 3) // 2 configured + 1 default
+				for _, metricDetails := range result {
+					assert.Contains(t, metricDetails.Statistics, models.StatisticAvg)
 				}
 			},
 		},
@@ -511,9 +508,9 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 					Unit:        aws.String("units"),
 				},
 			},
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         1,
+			metricConfig:  nil,
+			expectedError: false,
+			expectedCount: 1,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
 				assert.Contains(t, result, "os.general.numVCPUs")
 			},
@@ -534,9 +531,9 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 					Unit:        aws.String("Percent"),
 				},
 			},
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         1,
+			metricConfig:  nil,
+			expectedError: false,
+			expectedCount: 1,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
 				assert.Contains(t, result, "os.general.numVCPUs")
 				assert.NotContains(t, result, "os.cpuUtilization.guest")
@@ -558,9 +555,9 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 					Unit:        nil,
 				},
 			},
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         1,
+			metricConfig:  nil,
+			expectedError: false,
+			expectedCount: 1,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
 				assert.Contains(t, result, "os.general.numVCPUs")
 				assert.NotContains(t, result, "os.cpuUtilization.idle")
@@ -577,9 +574,9 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 					Unit:        aws.String("Transactions"),
 				},
 			},
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         1,
+			metricConfig:  nil,
+			expectedError: false,
+			expectedCount: 1,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
 				assert.Equal(t, "Number of active transactions", result["db.Transactions.active_transactions"].Description)
 			},
@@ -595,11 +592,32 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 					Unit:        aws.String("Transactions"),
 				},
 			},
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         1,
+			metricConfig:  nil,
+			expectedError: false,
+			expectedCount: 1,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
-				assert.Equal(t, "Number of active transactions", result["db.Transactions.active_transactions"].Description)
+				registry := NewPerEngineMetricRegistry()
+				firstMetrics := []types.ResponseResourceMetric{
+					{
+						Metric:      aws.String("db.Transactions.active_transactions"),
+						Description: aws.String("Number of active transactions"),
+						Unit:        aws.String("Transactions"),
+					},
+				}
+				firstResult, err := BuildMetricDefinitionMap(firstMetrics, nil, models.AuroraPostgreSQL, registry)
+				assert.NoError(t, err)
+				assert.Equal(t, "Number of active transactions", firstResult["db.Transactions.active_transactions"].Description)
+
+				secondMetrics := []types.ResponseResourceMetric{
+					{
+						Metric:      aws.String("db.Transactions.active_transactions"),
+						Description: aws.String("Number of Active transactions"),
+						Unit:        aws.String("Transactions"),
+					},
+				}
+				secondResult, err := BuildMetricDefinitionMap(secondMetrics, nil, models.AuroraPostgreSQL, registry)
+				assert.NoError(t, err)
+				assert.Equal(t, "Number of active transactions", secondResult["db.Transactions.active_transactions"].Description)
 			},
 		},
 		{
@@ -613,9 +631,9 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 					Unit:        aws.String("Transactions"),
 				},
 			},
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         1,
+			metricConfig:  nil,
+			expectedError: false,
+			expectedCount: 1,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
 				assert.Equal(t, "Active transaction count for MySQL", result["db.Transactions.active_transactions"].Description)
 			},
@@ -631,9 +649,9 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 					Unit:        aws.String("Percent"),
 				},
 			},
-			metricStatisticConfig: nil,
-			expectedError:         false,
-			expectedCount:         1,
+			metricConfig:  nil,
+			expectedError: false,
+			expectedCount: 1,
 			validateResults: func(t *testing.T, result map[string]models.MetricDetails) {
 				assert.Equal(t, "PostgreSQL CPU description", result["os.cpuUtilization.total"].Description)
 
@@ -644,7 +662,8 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 						Unit:        aws.String("Percent"),
 					},
 				}
-				mysqlResult, err := BuildMetricDefinitionMap(mysqlMetrics, nil, models.MySQL)
+				mysqlRegistry := NewPerEngineMetricRegistry()
+				mysqlResult, err := BuildMetricDefinitionMap(mysqlMetrics, nil, models.MySQL, mysqlRegistry)
 				assert.NoError(t, err)
 				assert.Equal(t, "MySQL CPU description", mysqlResult["os.cpuUtilization.total"].Description)
 			},
@@ -653,11 +672,8 @@ func TestBuildMetricDefinitionMap(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.resetGlobalRegistry {
-				globalPerEngineRegistry.ResetAllRegistries()
-			}
-
-			result, err := BuildMetricDefinitionMap(tc.availableMetrics, tc.metricStatisticConfig, tc.engine)
+			registry := NewPerEngineMetricRegistry()
+			result, err := BuildMetricDefinitionMap(tc.availableMetrics, tc.metricConfig, tc.engine, registry)
 
 			if tc.expectedError {
 				assert.Error(t, err)
@@ -732,94 +748,6 @@ func TestValidResponseResourceMetric(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := validResponseResourceMetric(tc.metric)
 			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
-
-func TestGetMetricStatistics(t *testing.T) {
-	testCases := []struct {
-		name               string
-		metricName         string
-		statisticConfig    *models.MetricStatisticConfig
-		expectedStatistics []models.Statistic
-	}{
-		{
-			name:               "nil config returns default avg",
-			metricName:         "os.general.numVCPUs",
-			statisticConfig:    nil,
-			expectedStatistics: []models.Statistic{models.StatisticAvg},
-		},
-		{
-			name:       "config with only default avg statistic",
-			metricName: "os.general.numVCPUs",
-			statisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticAvg,
-			},
-			expectedStatistics: []models.Statistic{models.StatisticAvg},
-		},
-		{
-			name:       "config with only default max statistic",
-			metricName: "os.general.numVCPUs",
-			statisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticMax,
-			},
-			expectedStatistics: []models.Statistic{models.StatisticMax},
-		},
-		{
-			name:       "config with only default min statistic",
-			metricName: "os.cpuUtilization.guest",
-			statisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticMin,
-			},
-			expectedStatistics: []models.Statistic{models.StatisticMin},
-		},
-		{
-			name:       "config with only default sum statistic",
-			metricName: "db.SQL.total_query_time",
-			statisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticSum,
-			},
-			expectedStatistics: []models.Statistic{models.StatisticSum},
-		},
-		{
-			name:       "configured statistics plus default for matching metric",
-			metricName: "os.general.numVCPUs",
-			statisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticAvg,
-				Configured: map[string][]models.Statistic{
-					"os.general.numVCPUs": {models.StatisticMin, models.StatisticMax},
-				},
-			},
-			expectedStatistics: []models.Statistic{models.StatisticMin, models.StatisticMax, models.StatisticAvg},
-		},
-		{
-			name:       "only default for non-configured metric",
-			metricName: "os.cpuUtilization.guest",
-			statisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticAvg,
-				Configured: map[string][]models.Statistic{
-					"os.general.numVCPUs": {models.StatisticMin, models.StatisticMax},
-				},
-			},
-			expectedStatistics: []models.Statistic{models.StatisticAvg},
-		},
-		{
-			name:       "multiple configured statistics for metric",
-			metricName: "db.SQL.total_query_time",
-			statisticConfig: &models.MetricStatisticConfig{
-				Default: models.StatisticAvg,
-				Configured: map[string][]models.Statistic{
-					"db.SQL.total_query_time": {models.StatisticMin, models.StatisticMax, models.StatisticSum},
-				},
-			},
-			expectedStatistics: []models.Statistic{models.StatisticMin, models.StatisticMax, models.StatisticSum, models.StatisticAvg},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result := getMetricStatistics(tc.metricName, tc.statisticConfig)
-			assert.Equal(t, tc.expectedStatistics, result)
 		})
 	}
 }

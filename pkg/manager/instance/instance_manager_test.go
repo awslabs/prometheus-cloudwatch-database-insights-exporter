@@ -25,17 +25,17 @@ func TestNewRDSInstanceManager(t *testing.T) {
 		{
 			name:           "valid RDS service with default config",
 			mockRDSService: &mocks.MockRDSService{},
-			config:         testutils.CreateDefaultTestConfig(),
+			config:         testutils.CreateDefaultParsedTestConfig(),
 		},
 		{
 			name:           "nil RDS service with config",
 			mockRDSService: nil,
-			config:         testutils.CreateDefaultTestConfig(),
+			config:         testutils.CreateDefaultParsedTestConfig(),
 		},
 		{
 			name:           "valid RDS service with maxInstances config",
 			mockRDSService: &mocks.MockRDSService{},
-			config:         testutils.CreateTestConfig(testutils.TestMaxInstances),
+			config:         testutils.CreateParsedTestConfig(testutils.TestMaxInstances),
 		},
 	}
 
@@ -46,7 +46,7 @@ func TestNewRDSInstanceManager(t *testing.T) {
 
 			assert.NotNil(t, manager)
 			assert.Equal(t, tc.mockRDSService, manager.rdsService)
-			assert.Equal(t, tc.config, manager.Configuration)
+			assert.Equal(t, tc.config, manager.configuration)
 			assert.Empty(t, manager.Instances)
 			assert.True(t, manager.InstancesLastUpdated.Before(time.Now().Add(-5*time.Minute)))
 		})
@@ -66,7 +66,7 @@ func TestGetInstances(t *testing.T) {
 			name: "get instances within instanceTTL",
 			setupManager: func() *RDSInstanceManager {
 				mockRDSService := &mocks.MockRDSService{}
-				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultTestConfig())
+				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultParsedTestConfig())
 				manager.Instances = testutils.TestInstances
 				manager.InstancesLastUpdated = time.Now()
 				return manager
@@ -80,7 +80,7 @@ func TestGetInstances(t *testing.T) {
 			name: "get instances with expired cache success",
 			setupManager: func() *RDSInstanceManager {
 				mockRDSService := &mocks.MockRDSService{}
-				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultTestConfig())
+				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultParsedTestConfig())
 				return manager
 			},
 			mockResponse:  mocks.NewMockRDSDescribeInstances(),
@@ -92,7 +92,7 @@ func TestGetInstances(t *testing.T) {
 			name: "get instances with expired cache error",
 			setupManager: func() *RDSInstanceManager {
 				mockRDSService := &mocks.MockRDSService{}
-				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultTestConfig())
+				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultParsedTestConfig())
 				return manager
 			},
 			mockResponse:  nil,
@@ -104,7 +104,7 @@ func TestGetInstances(t *testing.T) {
 			name: "get instances with no cached data and empty RDS response",
 			setupManager: func() *RDSInstanceManager {
 				mockRDSService := &mocks.MockRDSService{}
-				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultTestConfig())
+				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateDefaultParsedTestConfig())
 				return manager
 			},
 			mockResponse:  mocks.NewMockRDSDescribeInstancesEmpty(),
@@ -116,7 +116,7 @@ func TestGetInstances(t *testing.T) {
 			name: "get instances limits to maxInstances = 1 when more available",
 			setupManager: func() *RDSInstanceManager {
 				mockRDSService := &mocks.MockRDSService{}
-				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateTestConfig(1))
+				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateParsedTestConfig(1))
 				return manager
 			},
 			mockResponse:  mocks.NewMockRDSDescribeInstances(),
@@ -128,7 +128,7 @@ func TestGetInstances(t *testing.T) {
 			name: "get instances returns all when fewer than maxInstances",
 			setupManager: func() *RDSInstanceManager {
 				mockRDSService := &mocks.MockRDSService{}
-				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateTestConfig(testutils.TestMaxInstances/2))
+				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateParsedTestConfig(testutils.TestMaxInstances/2))
 				return manager
 			},
 			mockResponse:  mocks.NewMockRDSDescribeInstances(),
@@ -140,7 +140,7 @@ func TestGetInstances(t *testing.T) {
 			name: "get instances with maxInstances = 0 (edge case) returns none",
 			setupManager: func() *RDSInstanceManager {
 				mockRDSService := &mocks.MockRDSService{}
-				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateTestConfig(0))
+				manager, _ := NewRDSInstanceManager(mockRDSService, testutils.CreateParsedTestConfig(0))
 				return manager
 			},
 			mockResponse:  mocks.NewMockRDSDescribeInstances(),
@@ -237,7 +237,7 @@ func TestDiscoverInstances(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mockRDS := &mocks.MockRDSService{}
-			manager, _ := NewRDSInstanceManager(mockRDS, testutils.CreateDefaultTestConfig())
+			manager, _ := NewRDSInstanceManager(mockRDS, testutils.CreateDefaultParsedTestConfig())
 
 			if tc.shouldCallRDS {
 				mockRDS.On("DescribeDBInstancesPaginator", mock.Anything).

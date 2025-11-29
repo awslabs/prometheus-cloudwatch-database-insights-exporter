@@ -11,7 +11,7 @@ var (
 )
 
 var (
-	TestTimestamp    = time.Date(2025, 10, 28, 10, 0, 0, 0, time.UTC) //OCTOBER 28th 2025 3PM PST
+	TestTimestamp    = time.Date(2025, 10, 28, 10, 0, 0, 0, time.UTC) // OCT 28, 2025 3PM PST
 	TestTimestampNow = time.Now()
 	TestTTL          = 5 * time.Minute
 	TestTimestampNil = time.Time{}
@@ -19,7 +19,7 @@ var (
 	TestInstanceCreationTimeMySQL      = time.Date(2024, 1, 5, 0, 0, 0, 0, time.UTC)  // JAN 5, 2024 OLD
 	TestInstanceCreationTimePostgreSQL = time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC) // MAY 20, 2024 NEW
 	TestInstanceCreationTimeExpired    = time.Date(2023, 10, 8, 0, 0, 0, 0, time.UTC) // OCT 8, 2023 OLDEST
-	TestInstanceCreationTimeNoMetrics  = time.Date(2024, 3, 10, 0, 0, 0, 0, time.UTC) // MAR 10, 2024
+	TestInstanceCreationTimeNoMetrics  = time.Date(2025, 3, 10, 0, 0, 0, 0, time.UTC) // NOV 21, 2025
 )
 
 var (
@@ -79,7 +79,7 @@ var (
 			MetricsDetails:     TestMetricsDetails,
 			MetricsList:        TestMetricNamesWithStats,
 			MetricsLastUpdated: TestTimestampNow,
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 
@@ -92,7 +92,7 @@ var (
 			MetricsDetails:     TestMetricsDetailsSmall,
 			MetricsList:        TestMetricNamesWithStatsSmall,
 			MetricsLastUpdated: TestTimestampNow,
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 
@@ -105,7 +105,7 @@ var (
 			MetricsDetails:     TestMetricsDetails,
 			MetricsList:        TestMetricNamesWithStats,
 			MetricsLastUpdated: TestTimestamp,
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 
@@ -118,7 +118,7 @@ var (
 			MetricsDetails:     nil,
 			MetricsList:        []string{},
 			MetricsLastUpdated: time.Time{},
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 
@@ -131,7 +131,7 @@ var (
 			MetricsDetails:     TestMetricsDetails,
 			MetricsList:        TestMetricNamesWithStats,
 			MetricsLastUpdated: TestTimestampNow,
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 
@@ -234,6 +234,18 @@ var (
 	TestMaxInstances = 25
 )
 
+// TestConfigBuilder provides a fluent interface for building test configurations
+type TestConfigBuilder struct {
+	regions      []string
+	maxInstances int
+	instanceTTL  time.Duration
+	statistic    models.Statistic
+	metadataTTL  time.Duration
+	concurrency  int
+	port         int
+	metricPrefix string
+}
+
 func NewTestInstance(resourceID, identifier string, engine models.Engine) models.Instance {
 	return models.Instance{
 		ResourceID:   resourceID,
@@ -244,7 +256,7 @@ func NewTestInstance(resourceID, identifier string, engine models.Engine) models
 			MetricsDetails:     TestMetricsDetails,
 			MetricsList:        TestMetricNamesWithStats,
 			MetricsLastUpdated: TestTimestampNow,
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 }
@@ -276,7 +288,7 @@ func NewTestInstancePostgreSQL() models.Instance {
 			MetricsDetails:     TestMetricsDetails,
 			MetricsList:        TestMetricNamesWithStats,
 			MetricsLastUpdated: TestTimestampNow,
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 }
@@ -291,7 +303,7 @@ func NewTestInstancePostgreSQLExpired() models.Instance {
 			MetricsDetails:     TestMetricsDetails,
 			MetricsList:        TestMetricNamesWithStats,
 			MetricsLastUpdated: TestTimestamp,
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 }
@@ -306,30 +318,134 @@ func NewTestInstanceNoMetrics() models.Instance {
 			MetricsDetails:     nil,
 			MetricsList:        []string{},
 			MetricsLastUpdated: time.Time{},
-			MetricsTTL:         TestTTL,
+			MetadataTTL:        TestTTL,
 		},
 	}
 }
 
-func CreateTestConfig(maxInstances int) *models.ParsedConfig {
+func NewTestConfigBuilder() *TestConfigBuilder {
+	return &TestConfigBuilder{
+		regions:      []string{"us-west-2"},
+		maxInstances: TestMaxInstances,
+		instanceTTL:  5 * time.Minute,
+		statistic:    models.StatisticAvg,
+		metadataTTL:  60 * time.Minute,
+		concurrency:  4,
+		port:         8081,
+		metricPrefix: "dbi",
+	}
+}
+
+func (b *TestConfigBuilder) WithRegions(regions []string) *TestConfigBuilder {
+	b.regions = regions
+	return b
+}
+
+func (b *TestConfigBuilder) WithMaxInstances(maxInstances int) *TestConfigBuilder {
+	b.maxInstances = maxInstances
+	return b
+}
+
+func (b *TestConfigBuilder) WithInstanceTTL(ttl time.Duration) *TestConfigBuilder {
+	b.instanceTTL = ttl
+	return b
+}
+
+func (b *TestConfigBuilder) WithStatistic(statistic models.Statistic) *TestConfigBuilder {
+	b.statistic = statistic
+	return b
+}
+
+func (b *TestConfigBuilder) WithMetadataTTL(ttl time.Duration) *TestConfigBuilder {
+	b.metadataTTL = ttl
+	return b
+}
+
+func (b *TestConfigBuilder) WithConcurrency(concurrency int) *TestConfigBuilder {
+	b.concurrency = concurrency
+	return b
+}
+
+func (b *TestConfigBuilder) WithPort(port int) *TestConfigBuilder {
+	b.port = port
+	return b
+}
+
+func (b *TestConfigBuilder) WithMetricPrefix(prefix string) *TestConfigBuilder {
+	b.metricPrefix = prefix
+	return b
+}
+
+func (b *TestConfigBuilder) Build() *models.ParsedConfig {
 	return &models.ParsedConfig{
 		Discovery: models.ParsedDiscoveryConfig{
-			Regions: []string{"us-west-2"},
+			Regions: b.regions,
 			Instances: models.ParsedInstancesConfig{
-				MaxInstances: maxInstances,
+				MaxInstances: b.maxInstances,
+				InstanceTTL:  b.instanceTTL,
 			},
 			Metrics: models.ParsedMetricsConfig{
-				Statistic: models.MetricStatisticConfig{
-					Default: models.StatisticAvg,
-				},
+				Statistic:   b.statistic,
+				MetadataTTL: b.metadataTTL,
+			},
+			Processing: models.ParsedProcessingConfig{
+				Concurrency: b.concurrency,
 			},
 		},
 		Export: models.ParsedExportConfig{
-			Port: 8081,
+			Port: b.port,
+			Prometheus: models.ParsedPrometheusConfig{
+				MetricPrefix: b.metricPrefix,
+			},
 		},
 	}
 }
 
-func CreateDefaultTestConfig() *models.ParsedConfig {
-	return CreateTestConfig(TestMaxInstances)
+func CreateParsedTestConfig(maxInstances int) *models.ParsedConfig {
+	return NewTestConfigBuilder().WithMaxInstances(maxInstances).Build()
+}
+
+func CreateDefaultParsedTestConfig() *models.ParsedConfig {
+	return NewTestConfigBuilder().Build()
+}
+
+func CreateTestConfig(overrides ...map[string]interface{}) *models.Config {
+	cfg := &models.Config{
+		Discovery: models.DiscoveryConfig{
+			Regions: []string{"us-west-2"},
+			Instances: models.InstancesConfig{
+				MaxInstances: TestMaxInstances,
+				InstanceTTL:  "5m",
+			},
+			Metrics: models.MetricsConfig{
+				Statistic:   "avg",
+				MetadataTTL: "60m",
+			},
+		},
+		Export: models.ExportConfig{
+			Port: 8081,
+			Prometheus: models.PrometheusConfig{
+				MetricPrefix: "dbi",
+			},
+		},
+	}
+
+	var override map[string]interface{}
+	if len(overrides) > 0 {
+		override = overrides[0]
+	} else {
+		override = map[string]interface{}{}
+	}
+
+	if stat, ok := override["statistic"].(string); ok {
+		cfg.Discovery.Metrics.Statistic = stat
+	}
+	if port, ok := override["port"].(int); ok {
+		cfg.Export.Port = port
+	}
+	if regions, ok := override["regions"].([]string); ok {
+		cfg.Discovery.Regions = regions
+	}
+
+	return cfg
 }
