@@ -2,7 +2,7 @@
 
 A Prometheus exporter that provides Aurora/RDS Performance Insights metrics with auto-discovery capabilities.
 
-As of Q4 2025, the exporter remains under active development. Current limitations include support for a single region and a maximum of 25 instances to maintain a 15-second scrape interval. These constraints are scheduled to be addressed in forthcoming releases.
+As of Q4 2025, the exporter remains under active development. Current filtering capabilities include instance-level and metric-level filtering. Tag-based instance filtering is planned for a future release. 
 
 ## Features
 
