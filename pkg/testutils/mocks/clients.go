@@ -29,6 +29,7 @@ func NewMockRDSDescribeInstances() []rdstypes.DBInstance {
 	return []rdstypes.DBInstance{
 		{
 			DBInstanceIdentifier:       aws.String("test-postgres-db"),
+			DBInstanceArn:              aws.String("arn:aws:rds:us-west-2:123456789012:db:test-postgres-db"),
 			InstanceCreateTime:         aws.Time(testutils.TestInstanceCreationTimePostgreSQL),
 			DbiResourceId:              aws.String("db-TESTPOSTGRES"),
 			Engine:                     aws.String("aurora-postgresql"),
@@ -36,9 +37,14 @@ func NewMockRDSDescribeInstances() []rdstypes.DBInstance {
 			DBInstanceClass:            aws.String("db.t3.micro"),
 			AllocatedStorage:           aws.Int32(20),
 			PerformanceInsightsEnabled: aws.Bool(true),
+			TagList: []rdstypes.Tag{
+				{Key: aws.String("Environment"), Value: aws.String("test")},
+				{Key: aws.String("Team"), Value: aws.String("platform")},
+			},
 		},
 		{
 			DBInstanceIdentifier:       aws.String("test-mysql-db"),
+			DBInstanceArn:              aws.String("arn:aws:rds:us-west-2:123456789012:db:test-mysql-db"),
 			InstanceCreateTime:         aws.Time(testutils.TestInstanceCreationTimeMySQL),
 			DbiResourceId:              aws.String("db-TESTMYSQL"),
 			Engine:                     aws.String("aurora-mysql"),
@@ -46,6 +52,10 @@ func NewMockRDSDescribeInstances() []rdstypes.DBInstance {
 			DBInstanceClass:            aws.String("db.t3.small"),
 			AllocatedStorage:           aws.Int32(50),
 			PerformanceInsightsEnabled: aws.Bool(true),
+			TagList: []rdstypes.Tag{
+				{Key: aws.String("Environment"), Value: aws.String("production")},
+				{Key: aws.String("Team"), Value: aws.String("data")},
+			},
 		},
 	}
 }
@@ -58,6 +68,7 @@ func NewMockRDSDescribeInstancesSingle() []rdstypes.DBInstance {
 	return []rdstypes.DBInstance{
 		{
 			DBInstanceIdentifier:       aws.String("test-postgres-db"),
+			DBInstanceArn:              aws.String("arn:aws:rds:us-west-2:123456789012:db:test-postgres-db"),
 			InstanceCreateTime:         aws.Time(testutils.TestInstanceCreationTimePostgreSQL),
 			DbiResourceId:              aws.String("db-TESTPOSTGRES"),
 			Engine:                     aws.String("aurora-postgresql"),
@@ -65,6 +76,9 @@ func NewMockRDSDescribeInstancesSingle() []rdstypes.DBInstance {
 			DBInstanceClass:            aws.String("db.t3.micro"),
 			AllocatedStorage:           aws.Int32(20),
 			PerformanceInsightsEnabled: aws.Bool(true),
+			TagList: []rdstypes.Tag{
+				{Key: aws.String("Environment"), Value: aws.String("test")},
+			},
 		},
 	}
 }

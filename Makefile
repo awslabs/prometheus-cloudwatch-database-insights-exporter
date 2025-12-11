@@ -26,7 +26,7 @@ coverage-html: coverage-profile
 	@echo "Open coverage.html in your browser"
 
 # Run basic checks
-check: build format lint coverage
+check: build format lint coverage-profile
 	@echo "All checks passed!"
 
 # Clean build artifacts
@@ -40,6 +40,9 @@ clean:
 build:
 	@echo "Building project to dbinsights-exporter..."
 	go build -o dbinsights-exporter ./cmd
+
+release: check
+	@echo "Building release target of project to dbinsights-exporter..."
 
 # Build and run project
 run: build

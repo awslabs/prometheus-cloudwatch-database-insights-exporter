@@ -9,6 +9,7 @@ type Instance struct {
 	Identifier   string
 	Engine       Engine
 	CreationTime time.Time
+	Tags         map[string]string
 	Metrics      *Metrics
 }
 
@@ -20,5 +21,8 @@ func (instance Instance) GetFilterableFields() map[string]string {
 }
 
 func (instance Instance) GetFilterableTags() map[string]string {
-	return make(map[string]string) // Empty for now
+	if instance.Tags == nil {
+		return make(map[string]string)
+	}
+	return instance.Tags
 }

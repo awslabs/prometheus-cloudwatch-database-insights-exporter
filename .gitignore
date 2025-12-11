@@ -11,3 +11,4 @@ dbinsights-exporter
 coverage.out
 coverage.html
 config.yml
+/.kiro/

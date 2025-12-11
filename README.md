@@ -2,7 +2,7 @@
 
 A Prometheus exporter that provides Aurora/RDS Performance Insights metrics with auto-discovery capabilities.
 
-As of Q4 2025, the exporter remains under active development. Current filtering capabilities include instance-level and metric-level filtering. Tag-based instance filtering is planned for a future release. 
+As of Q4 2025, the exporter remains under active development. Current filtering capabilities include instance-level filtering (by identifier and engine), metric-level filtering, and tag-based instance filtering. 
 
 ## Features
 
@@ -91,8 +91,8 @@ Controls how the exporter discovers and monitors RDS/Aurora instances.
 | `regions` | array | Required | `["us-west-2"]` | List of AWS regions to scan for RDS/Aurora instances. **Note**: Only the first region is currently used (single-region support only) |
 | `instances.max-instances` | integer | Optional | `25` | Maximum number of instances to monitor. When this limit is exceeded, only the oldest `max-instances` are selected |
 | `instances.ttl` | string | Optional | `"5m"` | Time-to-live for cached instance discovery results |
-| `instances.include` | map | Optional | `{}` | Map of field names to regex pattern arrays for instance filtering (allowlist mode). Supported fields: `identifier`, `engine` |
-| `instances.exclude` | map | Optional | `{}` | Map of field names to regex pattern arrays for instance filtering (denylist mode). Supported fields: `identifier`, `engine` |
+| `instances.include` | map | Optional | `{}` | Map of field names to regex pattern arrays for instance filtering (allowlist mode). Supported fields: `identifier`, `engine`, `tag.<TagKey>` (e.g., `tag.Environment`, `tag.Team`) |
+| `instances.exclude` | map | Optional | `{}` | Map of field names to regex pattern arrays for instance filtering (denylist mode). Supported fields: `identifier`, `engine`, `tag.<TagKey>` (e.g., `tag.Status`, `tag.Maintenance`) |
 | `metrics.statistic` | string | Required | `"avg"` | Default statistic aggregation for Performance Insights metrics |
 | `metrics.metadata-ttl` | string | Optional | `"60m"` | Time-to-live for cached metric definitions |
 | `metrics.include` | map | Optional | `{}` | Map of field names to regex pattern arrays for metric filtering (allowlist mode). Supported fields: `name`, `category`, `unit` |
@@ -155,6 +155,7 @@ Exclude patterns take precedence over include patterns when both are specified.
 #### **Instance Fields**
 - `identifier` - RDS instance identifier (e.g., "prod-db-1")
 - `engine` - Database engine (e.g., "postgres", "aurora-mysql")
+- `tag.<TagKey>` - AWS resource tags (e.g., "tag.Environment", "tag.Team", "tag.CostCenter")
 
 #### **Metric Fields**
 - `name` - Performance Insights metric name (e.g., "db.SQL.queries", "os.cpuUtilization.user")
@@ -236,6 +237,76 @@ instances:
 **Filter Logic**: An instance must match:
 - `identifier` matches ANY of the include patterns **AND**
 - `engine` matches ANY of the include patterns **AND**
+
+#### **Tag-Based Instance Filtering**
+
+The exporter supports filtering instances based on AWS resource tags. Tags are retrieved automatically during instance discovery and can be used in both include and exclude filters.
+
+**Tag Filter Syntax**: Use `tag.<TagKey>` as the field name, where `<TagKey>` is the AWS tag key.
+
+**Example Configuration**:
+```yaml
+instances:
+  include:
+    identifier: ["^prod-", "^staging-"]
+    tag.Environment:
+      - "^production$"
+      - "^staging$"
+    tag.Team:
+      - "backend"
+      - "data"
+  exclude:
+    tag.Status:
+      - "deprecated"
+      - "decommissioned"
+    tag.Maintenance:
+      - "true"
+```
+
+**Tag Filter Behavior**:
+- **Include Logic**: ALL tag filters must match (AND logic across tag keys)
+- **Exclude Logic**: ANY tag filter match will exclude (OR logic)
+- **Exclude Precedence**: Exclude patterns take precedence over include patterns
+- **Independent Evaluation**: Tag filters are evaluated independently from field filters (identifier, engine)
+- **Combined Application**: An instance must pass BOTH field filters AND tag filters to be included
+- **Untagged Instances**: Instances with no tags will fail all tag-based include filters
+
+**Example Scenarios**:
+
+1. **Include only production instances from specific teams**:
+```yaml
+instances:
+  include:
+    tag.Environment: ["^production$"]
+    tag.Team: ["backend", "data", "platform"]
+```
+
+2. **Exclude instances under maintenance or deprecated**:
+```yaml
+instances:
+  exclude:
+    tag.Status: ["deprecated", "decommissioned"]
+    tag.Maintenance: ["true", "scheduled"]
+```
+
+3. **Combined field and tag filtering**:
+```yaml
+instances:
+  include:
+    identifier: ["^prod-"]           # Field filter
+    engine: ["postgres"]             # Field filter
+    tag.Environment: ["production"]  # Tag filter
+    tag.CostCenter: ["engineering"]  # Tag filter
+  exclude:
+    tag.Status: ["deprecated"]       # Exclude deprecated instances
+```
+
+In this example, an instance must:
+- Have identifier starting with "prod-" AND
+- Have engine containing "postgres" AND
+- Have Environment tag matching "production" AND
+- Have CostCenter tag matching "engineering" AND
+- NOT have Status tag matching "deprecated"
 
 #### **Metric Filtering Examples**
 ```yaml

@@ -1,0 +1,66 @@
+# Example configuration for Amazon CloudWatch Database Insights Exporter
+# This file demonstrates tag-based instance filtering
+
+discovery:
+  regions:
+    - us-west-2
+  
+  instances:
+    max-instances: 25
+    ttl: "5m"
+    
+    # Include instances based on field patterns
+    include:
+      identifier:
+        - "^prod-"
+        - "^staging-"
+      engine:
+        - "postgres"
+        - "mysql"
+      
+      # Tag-based filtering: Include instances with specific tags
+      # All tag filters must match (AND logic)
+      tag.Environment:
+        - "^production$"
+        - "^staging$"
+      tag.Team:
+        - "back"
+        - "again"
+    
+    # Exclude instances based on field patterns
+    exclude:
+      identifier:
+        - "test"
+        - "temp"
+      
+      # Tag-based filtering: Exclude instances with specific tags
+      # Any tag filter match will exclude (OR logic)
+      tag.Status:
+        - "deprecated"
+        - "decommissioned"
+      tag.Maintenance:
+        - "true"
+  
+  metrics:
+    statistic: "avg"
+    metadata-ttl: "60m"
+    
+    include:
+      category:
+        - "os"
+        - "db"
+      name:
+        - "cpu"
+        - "memory"
+    
+    exclude:
+      name:
+        - "test"
+  
+  processing:
+    concurrency: 4
+
+export:
+  port: 8081
+  prometheus:
+    metric-prefix: "dbi"

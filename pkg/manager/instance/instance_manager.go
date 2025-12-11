@@ -88,8 +88,8 @@ func (instanceManager *RDSInstanceManager) discoverInstances(ctx context.Context
 	}
 
 	var instances []models.Instance
-	for _, instance := range discoveredInstances {
-		instanceFields, err := safeExtractInstanceFields(instance)
+	for _, dbInstance := range discoveredInstances {
+		instanceFields, err := safeExtractInstanceFields(dbInstance)
 		if err != nil {
 			log.Printf("[INSTANCE] Error extracting instance fields: %v", err)
 			continue
@@ -98,11 +98,20 @@ func (instanceManager *RDSInstanceManager) discoverInstances(ctx context.Context
 		var instance models.Instance
 		engine := models.NewEngine(instanceFields.Engine)
 		if instanceFields.PerformanceInsightsEnabled && engine != "" {
+			// Extract tags from DBInstance
+			tags := make(map[string]string)
+			for _, tag := range dbInstance.TagList {
+				if tag.Key != nil && tag.Value != nil {
+					tags[*tag.Key] = *tag.Value
+				}
+			}
+
 			instance = models.Instance{
 				ResourceID:   instanceFields.DbiResourceId,
 				Identifier:   instanceFields.DBInstanceIdentifier,
 				Engine:       engine,
 				CreationTime: instanceFields.InstanceCreateTime,
+				Tags:         tags,
 				Metrics: &models.Metrics{
 					MetadataTTL: instanceManager.configuration.Discovery.Metrics.MetadataTTL,
 				},
