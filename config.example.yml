@@ -56,6 +56,27 @@ discovery:
       name:
         - "test"
 
+    # Break a metric down by one of its Performance Insights dimension groups.
+    # Each rule matches metric names by regex; matching metrics are queried with a
+    # GroupBy and exported as one series per dimension, under their own metric
+    # name suffixed with the group (db.load.avg -> dbi_pg_db_load_avg_by_db_wait_event).
+    #
+    # Grouping adds no API requests: GroupBy travels inside the query it applies to.
+    #
+    # limit is required and caps how many dimensions are returned, which is what
+    # decides exported cardinality. db.wait_event.type is a handful of series per
+    # instance; db.sql_tokenized can be hundreds. It cannot exceed 25, the most a
+    # single response can carry.
+    #
+    # Omit this section entirely to query every metric ungrouped (the default).
+    dimensions:
+      - pattern: "^db\\.load\\..*"
+        group: "db.wait_event"
+        keys:
+          - "db.wait_event.type"
+          - "db.wait_event.name"
+        limit: 10
+
     cache:
       metric-metadata-ttl: "60m"    # How long to cache metric definitions per instance
       metric-data:

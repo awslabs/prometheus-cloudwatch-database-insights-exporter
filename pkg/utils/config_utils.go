@@ -30,6 +30,11 @@ const (
 	DefaultCacheMaxSize   = 100000
 	MinCacheMaxSize       = 1
 	ValidPrometheusName   = `^[a-zA-Z_:][a-zA-Z0-9_:]*$`
+
+	// MaxDimensionLimit mirrors the API cap on results returned for a dimension
+	// group in a single response. Going beyond it would require paginating with
+	// NextToken, which would turn one request into several.
+	MaxDimensionLimit = 25
 )
 
 func LoadConfig(filePath string) (*models.ParsedConfig, error) {
@@ -329,6 +334,11 @@ func parsedMetricsConfig(config models.MetricsConfig) (models.ParsedMetricsConfi
 		metricFilter = filter.NewPatternFilter(includePatterns, excludePatterns)
 	}
 
+	parsedDimensionGroups, err := parseDimensionGroups(config.Dimensions)
+	if err != nil {
+		return models.ParsedMetricsConfig{}, err
+	}
+
 	return models.ParsedMetricsConfig{
 		Statistic:         defaultStatistic,
 		MetadataCacheTTL:  metadataCacheTTL,
@@ -337,7 +347,50 @@ func parsedMetricsConfig(config models.MetricsConfig) (models.ParsedMetricsConfi
 		Filter:            metricFilter,
 		Include:           config.Include,
 		Exclude:           config.Exclude,
+		DimensionGroups:   parsedDimensionGroups,
 	}, nil
+}
+
+// parseDimensionGroups validates and compiles the dimension breakdown rules.
+//
+// limit is required rather than defaulted: it decides how many series each
+// instance contributes, and a silent default would make a cardinality decision
+// on the operator's behalf. It is capped at MaxDimensionLimit because the API
+// returns at most that many results in one response, and anything beyond would
+// need pagination, which would cost extra API requests.
+func parseDimensionGroups(configs []models.DimensionGroupConfig) ([]models.ParsedDimensionGroup, error) {
+	if len(configs) == 0 {
+		return nil, nil
+	}
+
+	parsed := make([]models.ParsedDimensionGroup, 0, len(configs))
+	for index, dimensionConfig := range configs {
+		pattern, err := regexp.Compile(dimensionConfig.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].pattern in config.yml: %v", index, err)
+		}
+
+		if dimensionConfig.Group == "" {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].group in config.yml: group cannot be empty", index)
+		}
+
+		if len(dimensionConfig.Keys) == 0 {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].keys in config.yml: at least one key is required", index)
+		}
+
+		if dimensionConfig.Limit < 1 || dimensionConfig.Limit > MaxDimensionLimit {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].limit in config.yml: limit must be between 1 and %d, got %d", index, MaxDimensionLimit, dimensionConfig.Limit)
+		}
+
+		parsed = append(parsed, models.ParsedDimensionGroup{
+			Pattern: pattern,
+			Group:   dimensionConfig.Group,
+			Keys:    dimensionConfig.Keys,
+			Limit:   int32(dimensionConfig.Limit),
+		})
+	}
+
+	return parsed, nil
 }
 
 func parseProcessingConfig(config models.ProcessingConfig) models.ParsedProcessingConfig {

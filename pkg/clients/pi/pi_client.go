@@ -67,13 +67,39 @@ func (piClient *PIClient) ListAvailableResourceMetrics(ctx context.Context, reso
 	return result, nil
 }
 
-func (piClient *PIClient) GetResourceMetrics(ctx context.Context, resourceID string, metricNames []string) (*pi.GetResourceMetricsOutput, error) {
+// buildMetricQueries turns metric names into API queries, attaching a GroupBy to
+// the ones configured to be broken down.
+func buildMetricQueries(metricNames []string, dimensionGroups map[string]*models.ParsedDimensionGroup) []types.MetricQuery {
 	var metricQueries []types.MetricQuery
+
 	for _, metricName := range metricNames {
-		metricQueries = append(metricQueries, types.MetricQuery{
+		metricQuery := types.MetricQuery{
 			Metric: aws.String(metricName),
-		})
+		}
+
+		if group := dimensionGroups[metricName]; group != nil {
+			metricQuery.GroupBy = &types.DimensionGroup{
+				Group:      aws.String(group.Group),
+				Dimensions: group.Keys,
+				Limit:      aws.Int32(group.Limit),
+			}
+		}
+
+		metricQueries = append(metricQueries, metricQuery)
 	}
+
+	return metricQueries
+}
+
+// GetResourceMetrics fetches metric data for a resource. Metrics listed in
+// dimensionGroups are requested with a GroupBy, so the response carries one
+// series per dimension in addition to the aggregate. A nil or absent entry
+// leaves the metric ungrouped.
+//
+// Grouping does not add API requests: GroupBy travels inside the MetricQuery it
+// applies to.
+func (piClient *PIClient) GetResourceMetrics(ctx context.Context, resourceID string, metricNames []string, dimensionGroups map[string]*models.ParsedDimensionGroup) (*pi.GetResourceMetricsOutput, error) {
+	metricQueries := buildMetricQueries(metricNames, dimensionGroups)
 
 	startTime := time.Now().Add(-PIMetricLookbackSeconds * time.Second)
 	endTime := time.Now()

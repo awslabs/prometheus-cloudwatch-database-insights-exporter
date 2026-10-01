@@ -123,7 +123,8 @@ func (instanceManager *RDSInstanceManager) discoverInstances(ctx context.Context
 				CreationTime: instanceFields.InstanceCreateTime,
 				Tags:         tags,
 				Metrics: &models.Metrics{
-					MetadataTTL: instanceManager.MetadataTTL,
+					MetadataTTL:     instanceManager.MetadataTTL,
+					DimensionSeries: models.NewDimensionSeriesStore(),
 				},
 			}
 		}
