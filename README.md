@@ -601,6 +601,35 @@ curl http://localhost:8081/health
 # {"status":"ok"}
 ```
 
+### Container Image
+
+A `Dockerfile` is provided at the repository root. It is a multi-stage build producing a static
+binary on a distroless base, running as a non-root user:
+
+```bash
+docker build -t prometheus-cloudwatch-database-insights-exporter:local .
+docker run --rm -p 8081:8081 \
+  -v "$PWD/config.yml:/etc/dbinsights/config.yml:ro" \
+  prometheus-cloudwatch-database-insights-exporter:local -config /etc/dbinsights/config.yml
+```
+
+The project does not publish images yet, so push your build to a registry your cluster can reach.
+
+### Helm Chart
+
+A chart lives in [`charts/prometheus-cloudwatch-database-insights-exporter`](charts/prometheus-cloudwatch-database-insights-exporter),
+covering the Deployment, Service, ConfigMap, ServiceAccount (where IRSA is wired) and an optional
+ServiceMonitor:
+
+```bash
+helm install db-insights ./charts/prometheus-cloudwatch-database-insights-exporter \
+  --set image.repository=<your-registry>/prometheus-cloudwatch-database-insights-exporter \
+  --set image.tag=<your-tag>
+```
+
+See the [chart README](charts/prometheus-cloudwatch-database-insights-exporter/README.md) for the
+full list of values.
+
 ### Kubernetes Deployment
 
 Use `/health` for liveness and readiness probes to avoid triggering expensive PI API scrapes on every probe hit:

@@ -1,0 +1,18 @@
+{{ .Chart.Name }} is installed as {{ include "dbinsights-exporter.fullname" . }}.
+
+Metrics:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "dbinsights-exporter.fullname" . }} {{ .Values.service.port | default (include "dbinsights-exporter.port" .) }}
+  curl http://localhost:{{ .Values.service.port | default (include "dbinsights-exporter.port" .) }}/metrics
+
+{{ if not .Values.serviceAccount.annotations -}}
+The service account carries no annotations, so the exporter will fall back to whatever
+credentials the node provides. To use IRSA or EKS Pod Identity instead, set:
+
+  serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::<account>:role/<role>
+
+The role needs rds:DescribeDBInstances, pi:ListAvailableResourceMetrics and pi:GetResourceMetrics.
+{{- end }}
+{{- if not .Values.serviceMonitor.enabled }}
+
+No ServiceMonitor was created. If you run the Prometheus Operator, set serviceMonitor.enabled=true.
+{{- end }}

@@ -1,0 +1,109 @@
+# The project does not publish an official image yet, so there is no default
+# that would be right for everyone. Build the Dockerfile at the repository root,
+# push it somewhere your cluster can pull from, and set repository here.
+image:
+  repository: ""
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  # IRSA and EKS Pod Identity are both wired through annotations, for example:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/db-insights-exporter
+  annotations: {}
+  automountServiceAccountToken: true
+
+# Rendered into a ConfigMap and mounted at /etc/dbinsights/config.yml. The pods
+# roll automatically when this changes.
+#
+# See the project README for every field. The exporter needs rds:DescribeDBInstances,
+# pi:ListAvailableResourceMetrics and pi:GetResourceMetrics.
+config:
+  discovery:
+    regions:
+      - us-west-2
+    instances:
+      max-instances: 25
+      cache:
+        ttl: "5m"
+    metrics:
+      statistic: "avg"
+    processing:
+      concurrency: 4
+  export:
+    port: 8081
+    prometheus:
+      metric-prefix: "dbi"
+
+# Passed as -debug. Logs cache decisions and every API request.
+debug: false
+
+extraArgs: []
+
+extraEnv: []
+extraEnvFrom: []
+
+service:
+  type: ClusterIP
+  # Defaults to config.export.port.
+  port: null
+  annotations: {}
+
+# Requires the Prometheus Operator CRDs.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  # The exporter calls the AWS API on scrape, so give it room.
+  scrapeTimeout: 30s
+  labels: {}
+  relabelings: []
+  metricRelabelings: []
+
+resources: {}
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# /health answers without calling AWS, so probing it is free.
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+
+extraVolumes: []
+extraVolumeMounts: []

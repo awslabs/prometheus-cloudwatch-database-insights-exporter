@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dbinsights-exporter.fullname" . }}
+  labels:
+    {{- include "dbinsights-exporter.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port | default (include "dbinsights-exporter.port" .) }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "dbinsights-exporter.selectorLabels" . | nindent 4 }}
