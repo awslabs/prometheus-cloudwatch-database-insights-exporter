@@ -101,11 +101,18 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 				instance.Identifier, len(metricsToFetch), len(metricsBatch))
 		}
 
-		metricDataResult, err := metricManager.getMetricData(ctx, instance.ResourceID, metricsToFetch)
+		dimensionGroups := metricManager.dimensionGroupsFor(metricsToFetch)
+
+		metricDataResult, err := metricManager.getMetricData(ctx, instance.ResourceID, metricsToFetch, dimensionGroups)
 		if err != nil {
 			log.Printf("[METRIC MANAGER] Error getting metric data for these metrics: %v, error: %v", metricsToFetch, err)
 			return err
 		}
+
+		// A grouped metric answers with the aggregate plus one entry per
+		// dimension, so remember which sets came back. Without that, a later
+		// cache hit could only replay the aggregate.
+		returnedDimensionSets := make(map[string][]map[string]string)
 
 		// Process each metric from the response
 		for _, metricKeyDataPoints := range metricDataResult.MetricList {
@@ -114,6 +121,10 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 			}
 
 			metricName := *metricKeyDataPoints.Key.Metric
+			dimensions := metricKeyDataPoints.Key.Dimensions
+			if dimensionGroups[metricName] != nil {
+				returnedDimensionSets[metricName] = append(returnedDimensionSets[metricName], dimensions)
+			}
 			
 			// Get the latest 2 valid datapoints (for both latest value and dynamic TTL calculation)
 			// This is more efficient than iterating twice
@@ -123,9 +134,14 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 			}
 
 			metricDatum := models.MetricData{
-				Metric:    metricName,
-				Timestamp: *validDataPoints[0].Timestamp,
-				Value:     *validDataPoints[0].Value,
+				Metric:     metricName,
+				Timestamp:  *validDataPoints[0].Timestamp,
+				Value:      *validDataPoints[0].Value,
+				Dimensions: dimensions,
+			}
+			if group := dimensionGroups[metricName]; group != nil && len(dimensions) > 0 {
+				metricDatum.DimensionGroup = group.Group
+				metricDatum.DimensionKeys = group.Keys
 			}
 
 			// Calculate dynamic TTL from the valid datapoints (requires at least 2)
@@ -137,6 +153,12 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 			if err := formatting.ConvertToPrometheusMetric(ch, instance, metricDatum, metricManager.configuration.Export.Prometheus.MetricPrefix); err != nil {
 				log.Printf("[METRIC MANAGER] Error converting metric data to prometheus metric: %v, error: %v", metricDatum, err)
 				continue
+			}
+		}
+
+		if instance.Metrics != nil {
+			for metricName, dimensionSets := range returnedDimensionSets {
+				instance.Metrics.DimensionSeries.Record(metricName, dimensionSets)
 			}
 		}
 
@@ -196,9 +218,9 @@ func (metricManager *MetricManager) getAvailableMetrics(ctx context.Context, res
 	return utils.BuildMetricDefinitionMap(availableMetrics.Metrics, &metricManager.configuration.Discovery.Metrics, engine, metricManager.registry)
 }
 
-func (metricManager *MetricManager) getMetricData(ctx context.Context, resourceID string, metricNamesWithStat []string) (*awsPI.GetResourceMetricsOutput, error) {
+func (metricManager *MetricManager) getMetricData(ctx context.Context, resourceID string, metricNamesWithStat []string, dimensionGroups map[string]*models.ParsedDimensionGroup) (*awsPI.GetResourceMetricsOutput, error) {
 	metricDataResult, err := utils.WithRetry(ctx, func() (*awsPI.GetResourceMetricsOutput, error) {
-		return metricManager.piService.GetResourceMetrics(ctx, resourceID, metricNamesWithStat)
+		return metricManager.piService.GetResourceMetrics(ctx, resourceID, metricNamesWithStat, dimensionGroups)
 	}, MaxRetries, BaseDelay)
 	if err != nil {
 		return nil, err
@@ -274,6 +296,19 @@ func (metricManager *MetricManager) filterCachedMetrics(instance models.Instance
 		// Extract statistic from metric name
 		statistic := metricManager.extractStatistic(metricNameWithStat)
 
+		// A grouped metric is cached as several series, one per dimension set the
+		// last response carried. It can only be served from cache when every one
+		// of them is still fresh, otherwise the metric is refetched as a whole.
+		if metricManager.configuration.Discovery.Metrics.DimensionGroupFor(metricNameWithStat) != nil {
+			replayed, complete := metricManager.cachedDimensionSeries(instance, metricNameWithStat, statistic)
+			if complete {
+				cachedMetrics = append(cachedMetrics, replayed...)
+			} else {
+				metricsToFetch = append(metricsToFetch, metricNameWithStat)
+			}
+			continue
+		}
+
 		// Build cache key (region not needed since MetricManager is region-scoped)
 		cacheKey := cache.CacheKey{
 			Instance:   instance.Identifier,
@@ -311,6 +346,70 @@ func (metricManager *MetricManager) filterCachedMetrics(instance models.Instance
 	}
 
 	return metricsToFetch, cachedMetrics
+}
+
+// dimensionGroupsFor maps each metric that is configured to be broken down to
+// its dimension group. Metrics absent from the result are queried ungrouped.
+func (metricManager *MetricManager) dimensionGroupsFor(metricNamesWithStat []string) map[string]*models.ParsedDimensionGroup {
+	var dimensionGroups map[string]*models.ParsedDimensionGroup
+
+	for _, metricNameWithStat := range metricNamesWithStat {
+		group := metricManager.configuration.Discovery.Metrics.DimensionGroupFor(metricNameWithStat)
+		if group == nil {
+			continue
+		}
+		if dimensionGroups == nil {
+			dimensionGroups = make(map[string]*models.ParsedDimensionGroup)
+		}
+		dimensionGroups[metricNameWithStat] = group
+	}
+
+	return dimensionGroups
+}
+
+// cachedDimensionSeries rebuilds every series a grouped metric produced from the
+// cache. It reports false as soon as one series is missing or expired, because a
+// partial breakdown would understate the metric rather than simply go stale.
+func (metricManager *MetricManager) cachedDimensionSeries(instance models.Instance, metricNameWithStat string, statistic string) ([]models.MetricData, bool) {
+	if instance.Metrics == nil {
+		return nil, false
+	}
+
+	dimensionSets, known := instance.Metrics.DimensionSeries.Get(metricNameWithStat)
+	if !known || len(dimensionSets) == 0 {
+		return nil, false
+	}
+
+	group := metricManager.configuration.Discovery.Metrics.DimensionGroupFor(metricNameWithStat)
+	replayed := make([]models.MetricData, 0, len(dimensionSets))
+
+	for _, dimensions := range dimensionSets {
+		cacheKey := cache.CacheKey{
+			Instance:   instance.Identifier,
+			MetricName: metricNameWithStat,
+			Statistic:  statistic,
+			Dimensions: models.FingerprintDimensions(dimensions),
+		}
+
+		entry, found := metricManager.metricDataCache.Get(cacheKey)
+		if !found {
+			return nil, false
+		}
+
+		metricDatum := models.MetricData{
+			Metric:     metricNameWithStat,
+			Timestamp:  entry.Timestamp,
+			Value:      entry.Value,
+			Dimensions: dimensions,
+		}
+		if group != nil && len(dimensions) > 0 {
+			metricDatum.DimensionGroup = group.Group
+			metricDatum.DimensionKeys = group.Keys
+		}
+		replayed = append(replayed, metricDatum)
+	}
+
+	return replayed, true
 }
 
 // updateCacheWithDynamicTTL stores a fetched metric value in the cache with pattern-based or dynamic TTL.
@@ -359,6 +458,7 @@ func (metricManager *MetricManager) updateCacheWithDynamicTTL(instance models.In
 		Instance:   instance.Identifier,
 		MetricName: metricDatum.Metric,
 		Statistic:  statistic,
+		Dimensions: metricDatum.DimensionFingerprint(),
 	}
 
 	// Store in cache

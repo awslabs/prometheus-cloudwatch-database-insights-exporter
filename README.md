@@ -10,6 +10,7 @@ As of Q4 2025, the exporter remains under active development. Current filtering 
 - **Instance filtering**: Query metrics for specific instances using URL parameters
 - **Prometheus-compatible**: Standard `/metrics` endpoint with Prometheus format
 - **Health endpoint**: Lightweight `/health` endpoint for Kubernetes liveness and readiness probes
+- **Dimension breakdowns**: Slice metrics by any Performance Insights dimension group — see what `db.load` is actually waiting on
 - **Low-latency collection**: Efficient metric collection from Amazon RDS Performance Insights API
 - **Simple configuration**: YAML-based configuration with sensible defaults
 
@@ -162,6 +163,11 @@ Controls how the exporter discovers and monitors RDS/Aurora instances.
 | `metrics.statistic` | string | Required | `"avg"` | Default statistic aggregation for Performance Insights metrics |
 | `metrics.cache.metric-metadata-ttl` | string | Optional | `"60m"` | Time-to-live for cached metric definitions. How long to cache the list of available metrics for each instance |
 | `metrics.cache.metric-data.max-size` | integer | Optional | `100000` | Maximum number of metric values to cache. When exceeded, oldest entries are evicted |
+| `metrics.dimensions` | array | Optional | `[]` | Dimension breakdown rules. Each entry matches metric names by regex and requests a Performance Insights dimension group. Empty means every metric is queried ungrouped |
+| `metrics.dimensions[].pattern` | string | Required | — | Regex matched against the metric name including its statistic (e.g. `^db\.load\..*`) |
+| `metrics.dimensions[].group` | string | Required | — | Performance Insights dimension group, passed to the API verbatim (e.g. `db.wait_event`, `db.sql_tokenized`, `db.user`). Valid groups depend on the engine |
+| `metrics.dimensions[].keys` | array | Required | — | Dimension keys to return. Label names are derived from these, so every series of the metric carries the same labels |
+| `metrics.dimensions[].limit` | integer | Required | — | Maximum dimensions returned, between 1 and 25. This is the control on exported cardinality and has no default on purpose |
 | `metrics.cache.metric-data.pattern-ttls` | array | Optional | `[]` | Pattern-based TTL overrides for specific metrics. Patterns match against metric names (e.g., `db.load.avg`). If pattern TTL is smaller than the metric's data interval, the dynamic TTL will be used instead. If no pattern matches, TTL is calculated dynamically based on metric granularity |
 | `metrics.include` | map | Optional | `{}` | Map of field names to regex pattern arrays for metric filtering (allowlist mode). Supported fields: `name`, `category`, `unit` |
 | `metrics.exclude` | map | Optional | `{}` | Map of field names to regex pattern arrays for metric filtering (denylist mode). Supported fields: `name`, `category`, `unit` |
@@ -221,6 +227,63 @@ Patterns are regex expressions that match against metric names with statistics i
 3. Using this difference as the TTL (adapts to metric granularity automatically)
 
 This means per-second metrics (like `db.load`) get ~1s TTL, while per-minute metrics get ~60s TTL, without manual configuration.
+
+## Dimension Breakdowns
+
+Performance Insights can return a metric broken down by a dimension group, which is the one thing
+CloudWatch cannot do. Without it `db.load` only answers "how busy is this database"; with it, it
+answers "busy doing what".
+
+```yaml
+discovery:
+  metrics:
+    dimensions:
+      - pattern: "^db\\.load\\..*"
+        group: "db.wait_event"
+        keys:
+          - "db.wait_event.type"
+          - "db.wait_event.name"
+        limit: 10
+```
+
+This exports, in addition to the ungrouped metric:
+
+```
+dbi_pg_db_load_avg_by_db_wait_event{identifier="prod-db-1",db_wait_event_type="IO",db_wait_event_name="DataFileRead"} 7.1
+dbi_pg_db_load_avg_by_db_wait_event{identifier="prod-db-1",db_wait_event_type="CPU",db_wait_event_name=""} 3.2
+```
+
+Rules are evaluated in order and the first matching one wins. Omitting the section leaves every
+metric ungrouped, which is the default.
+
+### Why grouped series get their own metric name
+
+`limit` returns the top N dimensions and adds no "other" bucket, so a breakdown can sum to less
+than the ungrouped total. Exporting both under one metric name would mean either double counting
+the total or silently under-reporting it, so the breakdown is published separately, suffixed with
+the group name. The ungrouped metric keeps the name and meaning it always had.
+
+### Cost
+
+Grouping adds no API requests. `GroupBy` travels inside the `MetricQuery` it applies to, and
+Performance Insights bills per request, with 1 million requests per month included.
+
+The exception is `limit`: the API returns at most 25 results for a dimension group in one
+response, so the exporter rejects a larger value rather than paginate behind your back, since
+pagination would turn one request into several.
+
+### Cardinality
+
+`limit` is required rather than defaulted because it decides how many series each instance
+contributes, and that is not a decision to make silently on an operator's behalf. The groups differ
+by orders of magnitude:
+
+| Group | Series per instance | Notes |
+|-------|--------------------|-------|
+| `db.wait_event.type` | ~8-10 | Safe to enable broadly |
+| `db.wait_event.name` | tens | Reasonable with a limit |
+| `db.user`, `db.host`, `db.application` | depends on the workload | Usually small |
+| `db.sql`, `db.sql_tokenized` | hundreds | Enable deliberately, with a low limit |
 
 ## Metric Data Caching Recommendations
 

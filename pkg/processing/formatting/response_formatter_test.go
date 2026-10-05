@@ -205,7 +205,7 @@ func TestBuildPrometheusMetricName(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := buildPrometheusMetricName("dbi", tc.engineShortStr, tc.input)
+			result := buildPrometheusMetricName("dbi", tc.engineShortStr, tc.input, "")
 			assert.Equal(t, tc.expected, result)
 		})
 	}

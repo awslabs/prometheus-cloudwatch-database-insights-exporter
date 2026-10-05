@@ -9,6 +9,7 @@ import (
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/models"
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/testutils"
 )
 
@@ -85,6 +86,11 @@ func NewMockRDSDescribeInstancesSingle() []rdstypes.DBInstance {
 
 type MockPIService struct {
 	mock.Mock
+
+	// LastDimensionGroups records the dimension groups of the most recent call.
+	// They are deliberately kept out of Called so that expectations written
+	// before dimension support keep matching on three arguments.
+	LastDimensionGroups map[string]*models.ParsedDimensionGroup
 }
 
 func (mockPIService *MockPIService) ListAvailableResourceMetrics(ctx context.Context, resourceID string) (*pi.ListAvailableResourceMetricsOutput, error) {
@@ -95,7 +101,9 @@ func (mockPIService *MockPIService) ListAvailableResourceMetrics(ctx context.Con
 	return args.Get(0).(*pi.ListAvailableResourceMetricsOutput), args.Error(1)
 }
 
-func (mockPIService *MockPIService) GetResourceMetrics(ctx context.Context, resourceID string, metricNames []string) (*pi.GetResourceMetricsOutput, error) {
+func (mockPIService *MockPIService) GetResourceMetrics(ctx context.Context, resourceID string, metricNames []string, dimensionGroups map[string]*models.ParsedDimensionGroup) (*pi.GetResourceMetricsOutput, error) {
+	mockPIService.LastDimensionGroups = dimensionGroups
+
 	args := mockPIService.Called(ctx, resourceID, metricNames)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)

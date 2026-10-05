@@ -30,6 +30,11 @@ type CacheKey struct {
 	Instance   string
 	MetricName string
 	Statistic  string
+
+	// Dimensions distinguishes the series of a metric queried with a dimension
+	// group. It is the empty string for ungrouped metrics, so keys built before
+	// dimension support are unaffected.
+	Dimensions string
 }
 
 // MetricCacheEntry represents a cached metric value with its metadata.
