@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/filter"
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/models"
@@ -31,6 +32,15 @@ const (
 	MinCacheMaxSize       = 1
 	ValidPrometheusName   = `^[a-zA-Z_:][a-zA-Z0-9_:]*$`
 )
+
+// validRoleARNPattern accepts exactly the three real AWS partitions: standard, China (aws-cn),
+// and GovCloud (aws-us-gov). The role name/path segment uses IAM-allowed characters [\w+=,.@/-].
+// The {1,1000} upper bound is deliberately generous; the empty-name guard below catches trailing slashes.
+var validRoleARNPattern = regexp.MustCompile(`^arn:(aws|aws-cn|aws-us-gov):iam::\d{12}:role/[\w+=,.@/\-]{1,1000}$`)
+
+// validExternalIDPattern matches the character class of the AWS STS ExternalId constraint: [\w+=,.@:/-].
+// Length (2-1224) is checked separately because Go's RE2 engine caps repeat counts at 1000.
+var validExternalIDPattern = regexp.MustCompile(`^[\w+=,.@:/\-]+$`)
 
 func LoadConfig(filePath string) (*models.ParsedConfig, error) {
 	data, err := ioutil.ReadFile(filePath)
@@ -146,6 +156,37 @@ func parsedValidateConfig(config *models.Config) (*models.ParsedConfig, error) {
 	parsedConfig.Discovery.Metrics = metricsConfig
 
 	parsedConfig.Discovery.Processing = parseProcessingConfig(config.Discovery.Processing)
+
+	if roleARN := config.Discovery.RoleARN; roleARN != "" {
+		if !validRoleARNPattern.MatchString(roleARN) {
+			return nil, fmt.Errorf("invalid discovery.role_arn %q: expected format arn:aws*:iam::<12-digit-account>:role/<name>", roleARN)
+		}
+		// SplitN on the structural ":role/" prefix. IAM role names themselves cannot
+		// contain "/", so the last slash-delimited segment is always the role name.
+		rolePathAndName := strings.SplitN(roleARN, ":role/", 2)[1]
+		roleName := rolePathAndName
+		if i := strings.LastIndex(rolePathAndName, "/"); i >= 0 {
+			roleName = rolePathAndName[i+1:]
+		}
+		if roleName == "" {
+			return nil, fmt.Errorf("invalid discovery.role_arn %q: role name segment must not be empty", roleARN)
+		}
+		if utf8.RuneCountInString(roleName) > 64 {
+			return nil, fmt.Errorf("invalid discovery.role_arn: role name %q exceeds the AWS 64-character limit", roleName)
+		}
+		parsedConfig.Discovery.RoleARN = roleARN
+		if extID := config.Discovery.RoleARNExternalID; extID != "" {
+			if l := utf8.RuneCountInString(extID); l < 2 || l > 1224 {
+				return nil, fmt.Errorf("invalid discovery.role_arn_external_id: length must be 2-1224 characters (got %d)", l)
+			}
+			if !validExternalIDPattern.MatchString(extID) {
+				return nil, fmt.Errorf("invalid discovery.role_arn_external_id: must contain only [a-zA-Z0-9_+=,.@:/-]")
+			}
+			parsedConfig.Discovery.RoleARNExternalID = extID
+		}
+	} else if config.Discovery.RoleARNExternalID != "" {
+		return nil, fmt.Errorf("discovery.role_arn_external_id requires discovery.role_arn to be set")
+	}
 
 	exportConfig, err := parseExportConfig(config.Export)
 	if err != nil {

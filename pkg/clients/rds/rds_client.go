@@ -23,6 +23,13 @@ func NewRDSClient(region string) (*RDSClient, error) {
 	return NewRDSClientWithEndpoint(region, "")
 }
 
+// NewRDSClientFromConfig creates an RDS client from a pre-configured aws.Config.
+// Use this when credentials (e.g. assumed-role) are set up externally, such as
+// by the factory, so that multiple clients can share a single CredentialsCache.
+func NewRDSClientFromConfig(cfg aws.Config) *RDSClient {
+	return newRDSClientFromConfig(cfg, "")
+}
+
 func NewRDSClientWithEndpoint(region, endpoint string) (*RDSClient, error) {
 	log.Println("[RDS] Creating new RDS client...")
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
@@ -31,6 +38,11 @@ func NewRDSClientWithEndpoint(region, endpoint string) (*RDSClient, error) {
 		return nil, err
 	}
 
+	log.Printf("[RDS] AWS config loaded, region: %s", cfg.Region)
+	return newRDSClientFromConfig(cfg, endpoint), nil
+}
+
+func newRDSClientFromConfig(cfg aws.Config, endpoint string) *RDSClient {
 	client := rds.NewFromConfig(cfg)
 	if endpoint != "" {
 		client = rds.NewFromConfig(cfg, func(o *rds.Options) {
@@ -38,11 +50,7 @@ func NewRDSClientWithEndpoint(region, endpoint string) (*RDSClient, error) {
 		})
 		log.Printf("[RDS] Using custom endpoint: %s", endpoint)
 	}
-
-	log.Printf("[RDS] AWS config loaded, region: %s", region)
-	return &RDSClient{
-		client: client,
-	}, nil
+	return &RDSClient{client: client}
 }
 
 func (rdsClient *RDSClient) DescribeDBInstancesPaginator(ctx context.Context) ([]types.DBInstance, error) {
