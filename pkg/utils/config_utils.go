@@ -157,36 +157,11 @@ func parsedValidateConfig(config *models.Config) (*models.ParsedConfig, error) {
 
 	parsedConfig.Discovery.Processing = parseProcessingConfig(config.Discovery.Processing)
 
-	if roleARN := config.Discovery.RoleARN; roleARN != "" {
-		if !validRoleARNPattern.MatchString(roleARN) {
-			return nil, fmt.Errorf("invalid discovery.role_arn %q: expected format arn:aws*:iam::<12-digit-account>:role/<name>", roleARN)
-		}
-		// SplitN on the structural ":role/" prefix. IAM role names themselves cannot
-		// contain "/", so the last slash-delimited segment is always the role name.
-		rolePathAndName := strings.SplitN(roleARN, ":role/", 2)[1]
-		roleName := rolePathAndName
-		if i := strings.LastIndex(rolePathAndName, "/"); i >= 0 {
-			roleName = rolePathAndName[i+1:]
-		}
-		if roleName == "" {
-			return nil, fmt.Errorf("invalid discovery.role_arn %q: role name segment must not be empty", roleARN)
-		}
-		if utf8.RuneCountInString(roleName) > 64 {
-			return nil, fmt.Errorf("invalid discovery.role_arn: role name %q exceeds the AWS 64-character limit", roleName)
-		}
-		parsedConfig.Discovery.RoleARN = roleARN
-		if extID := config.Discovery.RoleARNExternalID; extID != "" {
-			if l := utf8.RuneCountInString(extID); l < 2 || l > 1224 {
-				return nil, fmt.Errorf("invalid discovery.role_arn_external_id: length must be 2-1224 characters (got %d)", l)
-			}
-			if !validExternalIDPattern.MatchString(extID) {
-				return nil, fmt.Errorf("invalid discovery.role_arn_external_id: must contain only [a-zA-Z0-9_+=,.@:/-]")
-			}
-			parsedConfig.Discovery.RoleARNExternalID = extID
-		}
-	} else if config.Discovery.RoleARNExternalID != "" {
-		return nil, fmt.Errorf("discovery.role_arn_external_id requires discovery.role_arn to be set")
+	roleConfig, err := parseRoleConfig(config.Discovery.Role)
+	if err != nil {
+		return nil, err
 	}
+	parsedConfig.Discovery.Role = roleConfig
 
 	exportConfig, err := parseExportConfig(config.Export)
 	if err != nil {
@@ -195,6 +170,48 @@ func parsedValidateConfig(config *models.Config) (*models.ParsedConfig, error) {
 	parsedConfig.Export = exportConfig
 
 	return &parsedConfig, nil
+}
+
+// parseRoleConfig validates the optional cross-account role settings.
+// Both fields of the result are empty when no role is configured.
+func parseRoleConfig(config models.RoleConfig) (models.ParsedRoleConfig, error) {
+	roleARN := config.ARN
+	externalID := config.ExternalID
+
+	if roleARN == "" {
+		if externalID != "" {
+			return models.ParsedRoleConfig{}, fmt.Errorf("discovery.role-arn-external-id requires discovery.role-arn to be set")
+		}
+		return models.ParsedRoleConfig{}, nil
+	}
+
+	if !validRoleARNPattern.MatchString(roleARN) {
+		return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn %q: expected format arn:aws*:iam::<12-digit-account>:role/<name>", roleARN)
+	}
+	// SplitN on the structural ":role/" prefix. IAM role names themselves cannot
+	// contain "/", so the last slash-delimited segment is always the role name.
+	rolePathAndName := strings.SplitN(roleARN, ":role/", 2)[1]
+	roleName := rolePathAndName
+	if i := strings.LastIndex(rolePathAndName, "/"); i >= 0 {
+		roleName = rolePathAndName[i+1:]
+	}
+	if roleName == "" {
+		return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn %q: role name segment must not be empty", roleARN)
+	}
+	if utf8.RuneCountInString(roleName) > 64 {
+		return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn: role name %q exceeds the AWS 64-character limit", roleName)
+	}
+
+	if externalID != "" {
+		if l := utf8.RuneCountInString(externalID); l < 2 || l > 1224 {
+			return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn-external-id: length must be 2-1224 characters (got %d)", l)
+		}
+		if !validExternalIDPattern.MatchString(externalID) {
+			return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn-external-id: must contain only [a-zA-Z0-9_+=,.@:/-]")
+		}
+	}
+
+	return models.ParsedRoleConfig{ARN: roleARN, ExternalID: externalID}, nil
 }
 
 func getAllValidFilterFields() map[string]bool {

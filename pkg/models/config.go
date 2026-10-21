@@ -12,12 +12,11 @@ type Config struct {
 }
 
 type DiscoveryConfig struct {
-	Regions           []string
-	Instances         InstancesConfig
-	Metrics           MetricsConfig
-	Processing        ProcessingConfig
-	RoleARN           string `yaml:"role_arn,omitempty"`
-	RoleARNExternalID string `yaml:"role_arn_external_id,omitempty"`
+	Regions    []string
+	Instances  InstancesConfig
+	Metrics    MetricsConfig
+	Processing ProcessingConfig
+	Role       RoleConfig `yaml:",inline"`
 }
 
 type ExportConfig struct {
@@ -52,6 +51,13 @@ type ProcessingConfig struct {
 	Concurrency int
 }
 
+// RoleConfig holds the optional cross-account role settings. It is inlined into
+// DiscoveryConfig, so the keys sit directly under discovery in the YAML file.
+type RoleConfig struct {
+	ARN        string `yaml:"role-arn,omitempty"`
+	ExternalID string `yaml:"role-arn-external-id,omitempty"`
+}
+
 type PrometheusConfig struct {
 	MetricPrefix string `yaml:"metric-prefix"`
 }
@@ -75,12 +81,11 @@ type ParsedConfig struct {
 }
 
 type ParsedDiscoveryConfig struct {
-	Regions           []string
-	Instances         ParsedInstancesConfig
-	Metrics           ParsedMetricsConfig
-	Processing        ParsedProcessingConfig
-	RoleARN           string
-	RoleARNExternalID string
+	Regions    []string
+	Instances  ParsedInstancesConfig
+	Metrics    ParsedMetricsConfig
+	Processing ParsedProcessingConfig
+	Role       ParsedRoleConfig
 }
 
 type ParsedExportConfig struct {
@@ -106,6 +111,11 @@ type ParsedMetricsConfig struct {
 
 type ParsedProcessingConfig struct {
 	Concurrency int
+}
+
+type ParsedRoleConfig struct {
+	ARN        string
+	ExternalID string
 }
 
 type ParsedPrometheusConfig struct {

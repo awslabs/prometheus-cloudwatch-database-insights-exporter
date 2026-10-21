@@ -185,7 +185,7 @@ func TestCreateSingleRegionManager(t *testing.T) {
 }
 
 func TestCreateSingleRegionManagerRoleARNWiring(t *testing.T) {
-	const stsXML = `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>TEST-ACCESS-KEY-ID-0</AccessKeyId><SecretAccessKey>TEST-SECRET-KEY-NOT-REAL-000000000000</SecretAccessKey><SessionToken>assumed-session-token</SessionToken><Expiration>2030-01-01T00:00:00Z</Expiration></Credentials><AssumedRoleUser><Arn>arn:aws:sts::123456789012:assumed-role/TestRole/rds-pi-exporter</Arn><AssumedRoleId>AROATEST:rds-pi-exporter</AssumedRoleId></AssumedRoleUser></AssumeRoleResult><ResponseMetadata><RequestId>test</RequestId></ResponseMetadata></AssumeRoleResponse>`
+	const stsXML = `<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleResult><Credentials><AccessKeyId>TEST-ACCESS-KEY-ID-0</AccessKeyId><SecretAccessKey>TEST-SECRET-KEY-NOT-REAL-000000000000</SecretAccessKey><SessionToken>assumed-session-token</SessionToken><Expiration>2030-01-01T00:00:00Z</Expiration></Credentials><AssumedRoleUser><Arn>arn:aws:sts::123456789012:assumed-role/TestRole/prometheus-cloudwatch-database-insights-exporter</Arn><AssumedRoleId>AROATEST:prometheus-cloudwatch-database-insights-exporter</AssumedRoleId></AssumedRoleUser></AssumeRoleResult><ResponseMetadata><RequestId>test</RequestId></ResponseMetadata></AssumeRoleResponse>`
 	const rdsXML = `<DescribeDBInstancesResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/"><DescribeDBInstancesResult><DBInstances/></DescribeDBInstancesResult><ResponseMetadata><RequestId>test</RequestId></ResponseMetadata></DescribeDBInstancesResponse>`
 
 	newMockServer := func(t *testing.T, capture *string, mu *sync.Mutex) *httptest.Server {
@@ -218,7 +218,7 @@ func TestCreateSingleRegionManagerRoleARNWiring(t *testing.T) {
 
 		cfg := &models.ParsedConfig{
 			Discovery: models.ParsedDiscoveryConfig{
-				RoleARN: "arn:aws:iam::123456789012:role/TestRole",
+				Role:      models.ParsedRoleConfig{ARN: "arn:aws:iam::123456789012:role/TestRole"},
 				Instances: models.ParsedInstancesConfig{MaxInstances: testutils.TestMaxInstances},
 				Metrics:   models.ParsedMetricsConfig{Statistic: models.StatisticAvg},
 			},
@@ -252,10 +252,9 @@ func TestCreateSingleRegionManagerRoleARNWiring(t *testing.T) {
 
 		cfg := &models.ParsedConfig{
 			Discovery: models.ParsedDiscoveryConfig{
-				RoleARN:           "arn:aws:iam::123456789012:role/TestRole",
-				RoleARNExternalID: "my-external-id",
-				Instances:         models.ParsedInstancesConfig{MaxInstances: testutils.TestMaxInstances},
-				Metrics:           models.ParsedMetricsConfig{Statistic: models.StatisticAvg},
+				Role:      models.ParsedRoleConfig{ARN: "arn:aws:iam::123456789012:role/TestRole", ExternalID: "my-external-id"},
+				Instances: models.ParsedInstancesConfig{MaxInstances: testutils.TestMaxInstances},
+				Metrics:   models.ParsedMetricsConfig{Statistic: models.StatisticAvg},
 			},
 		}
 
@@ -286,7 +285,7 @@ func TestCreateSingleRegionManagerRoleARNWiring(t *testing.T) {
 
 		cfg := &models.ParsedConfig{
 			Discovery: models.ParsedDiscoveryConfig{
-				RoleARN:   "arn:aws:iam::123456789012:role/TestRole",
+				Role:      models.ParsedRoleConfig{ARN: "arn:aws:iam::123456789012:role/TestRole"},
 				Instances: models.ParsedInstancesConfig{MaxInstances: testutils.TestMaxInstances},
 				Metrics:   models.ParsedMetricsConfig{Statistic: models.StatisticAvg},
 			},
@@ -303,7 +302,8 @@ func TestCreateSingleRegionManagerRoleARNWiring(t *testing.T) {
 		require.NotEmpty(t, stsBody)
 		values, err := url.ParseQuery(stsBody)
 		require.NoError(t, err)
-		assert.Equal(t, "rds-pi-exporter", values.Get("RoleSessionName"))
+		// Literal on purpose: pins the value sent to STS so a change to the constant fails here.
+		assert.Equal(t, "prometheus-cloudwatch-database-insights-exporter", values.Get("RoleSessionName"))
 	})
 
 	t.Run("single STS AssumeRole call is shared by both RDS and PI clients", func(t *testing.T) {
@@ -338,7 +338,7 @@ func TestCreateSingleRegionManagerRoleARNWiring(t *testing.T) {
 
 		cfg := &models.ParsedConfig{
 			Discovery: models.ParsedDiscoveryConfig{
-				RoleARN:   "arn:aws:iam::123456789012:role/TestRole",
+				Role:      models.ParsedRoleConfig{ARN: "arn:aws:iam::123456789012:role/TestRole"},
 				Instances: models.ParsedInstancesConfig{MaxInstances: testutils.TestMaxInstances},
 				Metrics:   models.ParsedMetricsConfig{Statistic: models.StatisticAvg},
 			},

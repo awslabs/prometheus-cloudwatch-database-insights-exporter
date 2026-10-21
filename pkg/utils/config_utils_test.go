@@ -247,22 +247,22 @@ func TestLoadConfigRoleARN(t *testing.T) {
 		validate      func(*testing.T, *models.ParsedConfig)
 	}{
 		{
-			name: "config with role_arn is parsed and propagated",
+			name: "config with role-arn is parsed and propagated",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
+  role-arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
   metrics:
     statistic: "avg"
 export:
   port: 8081`,
 			expectedError: false,
 			validate: func(t *testing.T, cfg *models.ParsedConfig) {
-				assert.Equal(t, "arn:aws:iam::123456789012:role/CrossAccountRole", cfg.Discovery.RoleARN)
+				assert.Equal(t, "arn:aws:iam::123456789012:role/CrossAccountRole", cfg.Discovery.Role.ARN)
 			},
 		},
 		{
-			name: "config without role_arn has empty RoleARN",
+			name: "config without role-arn has empty RoleARN",
 			configContent: `discovery:
   regions:
   - us-east-1
@@ -272,15 +272,15 @@ export:
   port: 8081`,
 			expectedError: false,
 			validate: func(t *testing.T, cfg *models.ParsedConfig) {
-				assert.Empty(t, cfg.Discovery.RoleARN)
+				assert.Empty(t, cfg.Discovery.Role.ARN)
 			},
 		},
 		{
-			name: "invalid role_arn format returns error at parse time",
+			name: "invalid role-arn format returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "not-an-arn"
+  role-arn: "not-an-arn"
   metrics:
     statistic: "avg"
 export:
@@ -288,26 +288,26 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn with role name at 64 chars is accepted",
+			name: "role-arn with role name at 64 chars is accepted",
 			configContent: fmt.Sprintf(`discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/%s"
+  role-arn: "arn:aws:iam::123456789012:role/%s"
   metrics:
     statistic: "avg"
 export:
   port: 8081`, strings.Repeat("a", 64)),
 			expectedError: false,
 			validate: func(t *testing.T, cfg *models.ParsedConfig) {
-				assert.Contains(t, cfg.Discovery.RoleARN, strings.Repeat("a", 64))
+				assert.Contains(t, cfg.Discovery.Role.ARN, strings.Repeat("a", 64))
 			},
 		},
 		{
-			name: "role_arn with role name over 64 chars returns error at parse time",
+			name: "role-arn with role name over 64 chars returns error at parse time",
 			configContent: fmt.Sprintf(`discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/%s"
+  role-arn: "arn:aws:iam::123456789012:role/%s"
   metrics:
     statistic: "avg"
 export:
@@ -315,11 +315,11 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn with path where name is exactly 64 chars is accepted",
+			name: "role-arn with path where name is exactly 64 chars is accepted",
 			configContent: fmt.Sprintf(`discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/mypath/%s"
+  role-arn: "arn:aws:iam::123456789012:role/mypath/%s"
   metrics:
     statistic: "avg"
 export:
@@ -327,11 +327,11 @@ export:
 			expectedError: false,
 		},
 		{
-			name: "role_arn with invalid role name characters returns error at parse time",
+			name: "role-arn with invalid role name characters returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/bad name!"
+  role-arn: "arn:aws:iam::123456789012:role/bad name!"
   metrics:
     statistic: "avg"
 export:
@@ -339,11 +339,11 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn missing account ID returns error at parse time",
+			name: "role-arn missing account ID returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam:::role/MissingAccount"
+  role-arn: "arn:aws:iam:::role/MissingAccount"
   metrics:
     statistic: "avg"
 export:
@@ -351,41 +351,41 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "China partition role_arn is accepted",
+			name: "China partition role-arn is accepted",
 			configContent: `discovery:
   regions:
   - cn-north-1
-  role_arn: "arn:aws-cn:iam::123456789012:role/CrossAccountRole"
+  role-arn: "arn:aws-cn:iam::123456789012:role/CrossAccountRole"
   metrics:
     statistic: "avg"
 export:
   port: 8081`,
 			expectedError: false,
 			validate: func(t *testing.T, cfg *models.ParsedConfig) {
-				assert.Equal(t, "arn:aws-cn:iam::123456789012:role/CrossAccountRole", cfg.Discovery.RoleARN)
+				assert.Equal(t, "arn:aws-cn:iam::123456789012:role/CrossAccountRole", cfg.Discovery.Role.ARN)
 			},
 		},
 		{
-			name: "GovCloud partition role_arn is accepted",
+			name: "GovCloud partition role-arn is accepted",
 			configContent: `discovery:
   regions:
   - us-gov-west-1
-  role_arn: "arn:aws-us-gov:iam::123456789012:role/CrossAccountRole"
+  role-arn: "arn:aws-us-gov:iam::123456789012:role/CrossAccountRole"
   metrics:
     statistic: "avg"
 export:
   port: 8081`,
 			expectedError: false,
 			validate: func(t *testing.T, cfg *models.ParsedConfig) {
-				assert.Equal(t, "arn:aws-us-gov:iam::123456789012:role/CrossAccountRole", cfg.Discovery.RoleARN)
+				assert.Equal(t, "arn:aws-us-gov:iam::123456789012:role/CrossAccountRole", cfg.Discovery.Role.ARN)
 			},
 		},
 		{
-			name: "role_arn_external_id without role_arn returns error at parse time",
+			name: "role-arn-external-id without role-arn returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn_external_id: "some-external-id"
+  role-arn-external-id: "some-external-id"
   metrics:
     statistic: "avg"
 export:
@@ -393,29 +393,29 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn_external_id with role_arn is propagated",
+			name: "role-arn-external-id with role-arn is propagated",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
-  role_arn_external_id: "my-external-id"
+  role-arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
+  role-arn-external-id: "my-external-id"
   metrics:
     statistic: "avg"
 export:
   port: 8081`,
 			expectedError: false,
 			validate: func(t *testing.T, cfg *models.ParsedConfig) {
-				assert.Equal(t, "arn:aws:iam::123456789012:role/CrossAccountRole", cfg.Discovery.RoleARN)
-				assert.Equal(t, "my-external-id", cfg.Discovery.RoleARNExternalID)
+				assert.Equal(t, "arn:aws:iam::123456789012:role/CrossAccountRole", cfg.Discovery.Role.ARN)
+				assert.Equal(t, "my-external-id", cfg.Discovery.Role.ExternalID)
 			},
 		},
 		{
-			name: "invalid role_arn_external_id returns error at parse time",
+			name: "invalid role-arn-external-id returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
-  role_arn_external_id: "x"
+  role-arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
+  role-arn-external-id: "x"
   metrics:
     statistic: "avg"
 export:
@@ -423,12 +423,12 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn_external_id with backslash returns error at parse time",
+			name: "role-arn-external-id with backslash returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
-  role_arn_external_id: "prod\\team"
+  role-arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
+  role-arn-external-id: "prod\\team"
   metrics:
     statistic: "avg"
 export:
@@ -436,12 +436,12 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn_external_id with ampersand returns error at parse time",
+			name: "role-arn-external-id with ampersand returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
-  role_arn_external_id: "prod&team"
+  role-arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
+  role-arn-external-id: "prod&team"
   metrics:
     statistic: "avg"
 export:
@@ -449,11 +449,11 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn with trailing slash returns error at parse time",
+			name: "role-arn with trailing slash returns error at parse time",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/mypath/"
+  role-arn: "arn:aws:iam::123456789012:role/mypath/"
   metrics:
     statistic: "avg"
 export:
@@ -461,19 +461,19 @@ export:
 			expectedError: true,
 		},
 		{
-			name: "role_arn_external_id with special chars is accepted",
+			name: "role-arn-external-id with special chars is accepted",
 			configContent: `discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
-  role_arn_external_id: "prod:account/team@corp.com"
+  role-arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
+  role-arn-external-id: "prod:account/team@corp.com"
   metrics:
     statistic: "avg"
 export:
   port: 8081`,
 			expectedError: false,
 			validate: func(t *testing.T, cfg *models.ParsedConfig) {
-				assert.Equal(t, "prod:account/team@corp.com", cfg.Discovery.RoleARNExternalID)
+				assert.Equal(t, "prod:account/team@corp.com", cfg.Discovery.Role.ExternalID)
 			},
 		},
 	}
@@ -509,8 +509,8 @@ func TestLoadConfigExternalIDLengthBoundary(t *testing.T) {
 		return fmt.Sprintf(`discovery:
   regions:
   - us-east-1
-  role_arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
-  role_arn_external_id: "%s"
+  role-arn: "arn:aws:iam::123456789012:role/CrossAccountRole"
+  role-arn-external-id: "%s"
   metrics:
     statistic: "avg"
 export:
@@ -532,13 +532,13 @@ export:
 	t.Run("ExternalID at min length (2 chars) is accepted", func(t *testing.T) {
 		cfg, err := writeAndLoad(t, makeConfig("ab"))
 		assert.NoError(t, err)
-		assert.Equal(t, "ab", cfg.Discovery.RoleARNExternalID)
+		assert.Equal(t, "ab", cfg.Discovery.Role.ExternalID)
 	})
 
 	t.Run("ExternalID at max length (1224 chars) is accepted", func(t *testing.T) {
 		cfg, err := writeAndLoad(t, makeConfig(strings.Repeat("a", 1224)))
 		assert.NoError(t, err)
-		assert.Equal(t, strings.Repeat("a", 1224), cfg.Discovery.RoleARNExternalID)
+		assert.Equal(t, strings.Repeat("a", 1224), cfg.Discovery.Role.ExternalID)
 	})
 
 	t.Run("ExternalID over max length (1225 chars) returns error", func(t *testing.T) {
@@ -950,6 +950,101 @@ func TestExtractMetricAndStatistic(t *testing.T) {
 			metric, statistic := extractMetricAndStatistic(tt.pattern)
 			assert.Equal(t, tt.expectedMetric, metric)
 			assert.Equal(t, tt.expectedStatistic, statistic)
+		})
+	}
+}
+
+func TestParseRoleConfig(t *testing.T) {
+	const validARN = "arn:aws:iam::123456789012:role/CrossAccountRole"
+
+	tests := []struct {
+		name               string
+		config             models.RoleConfig
+		expectedError      string
+		expectedRoleARN    string
+		expectedExternalID string
+	}{
+		{
+			name:   "no role configured returns empty values",
+			config: models.RoleConfig{},
+		},
+		{
+			name:            "valid role ARN is returned",
+			config:          models.RoleConfig{ARN: validARN},
+			expectedRoleARN: validARN,
+		},
+		{
+			name:               "valid role ARN with ExternalID returns both",
+			config:             models.RoleConfig{ARN: validARN, ExternalID: "my-external-id"},
+			expectedRoleARN:    validARN,
+			expectedExternalID: "my-external-id",
+		},
+		{
+			name:            "role ARN with path is accepted",
+			config:          models.RoleConfig{ARN: "arn:aws:iam::123456789012:role/mypath/CrossAccountRole"},
+			expectedRoleARN: "arn:aws:iam::123456789012:role/mypath/CrossAccountRole",
+		},
+		{
+			name:          "ExternalID without role ARN returns error",
+			config:        models.RoleConfig{ExternalID: "my-external-id"},
+			expectedError: "requires discovery.role-arn to be set",
+		},
+		{
+			name:          "malformed role ARN returns error",
+			config:        models.RoleConfig{ARN: "not-an-arn"},
+			expectedError: "expected format",
+		},
+		{
+			name:          "trailing-slash role ARN returns error",
+			config:        models.RoleConfig{ARN: "arn:aws:iam::123456789012:role/mypath/"},
+			expectedError: "role name segment must not be empty",
+		},
+		{
+			name:            "role name at exactly 64 characters is accepted",
+			config:          models.RoleConfig{ARN: "arn:aws:iam::123456789012:role/" + strings.Repeat("a", 64)},
+			expectedRoleARN: "arn:aws:iam::123456789012:role/" + strings.Repeat("a", 64),
+		},
+		{
+			name:          "role name over 64 characters returns error",
+			config:        models.RoleConfig{ARN: "arn:aws:iam::123456789012:role/" + strings.Repeat("a", 65)},
+			expectedError: "exceeds the AWS 64-character limit",
+		},
+		{
+			name:               "ExternalID at minimum length (2 characters) is accepted",
+			config:             models.RoleConfig{ARN: validARN, ExternalID: "ab"},
+			expectedRoleARN:    validARN,
+			expectedExternalID: "ab",
+		},
+		{
+			name:               "ExternalID at maximum length (1224 characters) is accepted",
+			config:             models.RoleConfig{ARN: validARN, ExternalID: strings.Repeat("a", 1224)},
+			expectedRoleARN:    validARN,
+			expectedExternalID: strings.Repeat("a", 1224),
+		},
+		{
+			name:          "ExternalID shorter than 2 characters returns error",
+			config:        models.RoleConfig{ARN: validARN, ExternalID: "x"},
+			expectedError: "length must be 2-1224 characters",
+		},
+		{
+			name:          "ExternalID with invalid characters returns error",
+			config:        models.RoleConfig{ARN: validARN, ExternalID: "prod&team"},
+			expectedError: "must contain only",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := parseRoleConfig(tt.config)
+			if tt.expectedError != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+				assert.Equal(t, models.ParsedRoleConfig{}, cfg)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedRoleARN, cfg.ARN)
+			assert.Equal(t, tt.expectedExternalID, cfg.ExternalID)
 		})
 	}
 }

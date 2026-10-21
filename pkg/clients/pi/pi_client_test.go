@@ -20,7 +20,7 @@ import (
 // newPIClientWithSTSClient is a test-only helper that injects a mock STS client
 // so unit tests can verify the AssumeRole credential chain without network calls.
 func newPIClientWithSTSClient(cfg aws.Config, roleARN, externalID string, stsClient stscreds.AssumeRoleAPIClient) (*PIClient, *aws.CredentialsCache) {
-	credCache := utils.NewAssumeRoleCredCache(stsClient, roleARN, externalID, "rds-pi-exporter")
+	credCache := utils.NewAssumeRoleCredCache(stsClient, roleARN, externalID, utils.AssumeRoleSessionName)
 	cfg.Credentials = credCache
 	return newPIClientFromConfig(cfg, ""), credCache
 }
@@ -61,7 +61,7 @@ func TestNewPIClientWithSTSClient(t *testing.T) {
 		assert.Equal(t, "TEST-ACCESS-KEY-ID-0", creds.AccessKeyID)
 		assert.Equal(t, "session-token", creds.SessionToken)
 		assert.Equal(t, "arn:aws:iam::123456789012:role/TestRole", mockSTS.CapturedRoleArnValue())
-		assert.Equal(t, "rds-pi-exporter", mockSTS.CapturedRoleSessionNameValue())
+		assert.Equal(t, utils.AssumeRoleSessionName, mockSTS.CapturedRoleSessionNameValue())
 	})
 
 	t.Run("ExternalID is forwarded to AssumeRole when set", func(t *testing.T) {

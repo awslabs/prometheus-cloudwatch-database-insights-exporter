@@ -21,7 +21,7 @@ As of Q4 2025, the exporter remains under active development. Current filtering 
   - `rds:DescribeDBInstances`
   - `pi:ListAvailableResourceMetrics`
   - `pi:GetResourceMetrics`
-  - `sts:AssumeRole` (only when using cross-account `role_arn`)
+  - `sts:AssumeRole` (only when using cross-account `role-arn`)
 
 ## Quick Start
 
@@ -114,8 +114,8 @@ The file is written in YAML format:
 discovery:
   regions:
     - "us-west-2"
-  role_arn: "arn:aws:iam::123456789012:role/pi-exporter-role"  # optional: assume role for cross-account access
-  role_arn_external_id: "my-external-id"                       # optional: ExternalID for confused-deputy mitigation
+  role-arn: "arn:aws:iam::123456789012:role/pi-exporter-role"  # optional: assume role for cross-account access
+  role-arn-external-id: "my-external-id"                       # optional: ExternalID for confused-deputy mitigation
   instances:
     max-instances: 25
     cache:
@@ -158,8 +158,8 @@ Controls how the exporter discovers and monitors RDS/Aurora instances.
 | Field | Type | Required/Optional | Default | Description |
 |-------|------|------------------|---------|-------------|
 | `regions` | array | Required | `["us-west-2"]` | List of AWS regions to scan for RDS/Aurora instances. **Note**: Only the first region is currently used (single-region support only) |
-| `role_arn` | string | Optional | `""` | IAM role ARN to assume before calling AWS APIs. Use for cross-account access. The exporter's own IAM identity (e.g., IRSA service account) must have `sts:AssumeRole` permission on this role. If empty, the default credential chain is used. Format: `arn:(aws\|aws-cn\|aws-us-gov):iam::<12-digit-account>:role/<name>`. Role name segment must not exceed 64 characters. |
-| `role_arn_external_id` | string | Optional | `""` | ExternalID condition for the AssumeRole call (confused-deputy mitigation). Only valid when `role_arn` is also set. Must match the `sts:ExternalId` condition in the target account's trust policy. Must be 2–1224 characters. Allowed characters: `[a-zA-Z0-9_+=,.@:/-]`. |
+| `role-arn` | string | Optional | `""` | IAM role ARN to assume before calling AWS APIs. Use for cross-account access. The exporter's own IAM identity (e.g., IRSA service account) must have `sts:AssumeRole` permission on this role. If empty, the default credential chain is used. Format: `arn:(aws\|aws-cn\|aws-us-gov):iam::<12-digit-account>:role/<name>`. Role name segment must not exceed 64 characters. |
+| `role-arn-external-id` | string | Optional | `""` | ExternalID condition for the AssumeRole call (confused-deputy mitigation). Only valid when `role-arn` is also set. Must match the `sts:ExternalId` condition in the target account's trust policy. Must be 2–1224 characters. Allowed characters: `[a-zA-Z0-9_+=,.@:/-]`. |
 | `instances.max-instances` | integer | Optional | `25` | Maximum number of instances to monitor (accepted range: 1–10,000; values above 10,000 are capped at 10,000). When this limit is exceeded, only the oldest `max-instances` are selected |
 | `instances.cache.ttl` | string | Optional | `"5m"` | Time-to-live for cached instance discovery results. How long to cache the list of RDS/Aurora instances before re-discovering |
 | `instances.include` | map | Optional | `{}` | Map of field names to regex pattern arrays for instance filtering (allowlist mode). Supported fields: `identifier`, `engine`, `tag.<TagKey>` (e.g., `tag.Environment`, `tag.Team`) |
@@ -647,14 +647,14 @@ scrape_configs:
 
 ## Cross-Account Access
 
-By default the exporter uses the credential chain of the process that runs it (environment variables, EC2 instance profile, EKS IRSA, etc.) to call RDS and Performance Insights APIs. When your RDS instances live in a **different AWS account** from where the exporter runs, configure `discovery.role_arn` to have the exporter assume a role in the target account before making any API calls.
+By default the exporter uses the credential chain of the process that runs it (environment variables, EC2 instance profile, EKS IRSA, etc.) to call RDS and Performance Insights APIs. When your RDS instances live in a **different AWS account** from where the exporter runs, configure `discovery.role-arn` to have the exporter assume a role in the target account before making any API calls.
 
 ### How it works
 
 ```
 Exporter process (source account)
   │
-  ├─ AssumeRoleWithWebIdentity (IRSA / instance profile)
+  ├─ Default credential chain (IRSA, EC2 instance profile, env vars, ...)
   │    → obtains source-account credentials
   │
   └─ sts:AssumeRole → target-account role
@@ -712,7 +712,7 @@ Credentials are cached in-process and refreshed automatically before expiry — 
 discovery:
   regions:
     - "eu-central-1"
-  role_arn: "arn:aws:iam::123456789012:role/pi-exporter-cross-account"
+  role-arn: "arn:aws:iam::123456789012:role/pi-exporter-cross-account"
 ```
 
 ### Confused-deputy protection (ExternalID)
@@ -725,8 +725,8 @@ If multiple tenants can assume your target role, add an `ExternalID` condition t
 
 ```yaml
 discovery:
-  role_arn: "arn:aws:iam::123456789012:role/pi-exporter-cross-account"
-  role_arn_external_id: "my-unique-id"
+  role-arn: "arn:aws:iam::123456789012:role/pi-exporter-cross-account"
+  role-arn-external-id: "my-unique-id"
 ```
 
 ### Error behaviour

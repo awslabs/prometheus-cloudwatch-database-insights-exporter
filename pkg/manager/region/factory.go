@@ -42,8 +42,8 @@ func (factory *RegionManagerFactory) CreateRegionManager(config *models.ParsedCo
 }
 
 func (factory *RegionManagerFactory) createSingleRegionManager(region string, config *models.ParsedConfig) (RegionManager, error) {
-	roleARN := config.Discovery.RoleARN
-	externalID := config.Discovery.RoleARNExternalID
+	roleARN := config.Discovery.Role.ARN
+	externalID := config.Discovery.Role.ExternalID
 
 	var rdsClient *rds.RDSClient
 	var piClient *pi.PIClient
@@ -54,7 +54,7 @@ func (factory *RegionManagerFactory) createSingleRegionManager(region string, co
 			return nil, fmt.Errorf("failed to load AWS config for role assumption: %w", err)
 		}
 		stsClient := sts.NewFromConfig(cfg)
-		cfg.Credentials = utils.NewAssumeRoleCredCache(stsClient, roleARN, externalID, "rds-pi-exporter")
+		cfg.Credentials = utils.NewAssumeRoleCredCache(stsClient, roleARN, externalID, utils.AssumeRoleSessionName)
 		log.Printf("[FACTORY] Cross-account role configured: %s, region: %s", roleARN, region)
 		rdsClient = rds.NewRDSClientFromConfig(cfg)
 		piClient = pi.NewPIClientFromConfig(cfg)

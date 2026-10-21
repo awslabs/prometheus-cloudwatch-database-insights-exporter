@@ -5,6 +5,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 )
 
+// AssumeRoleSessionName is the RoleSessionName sent on sts:AssumeRole, visible in CloudTrail.
+const AssumeRoleSessionName = "prometheus-cloudwatch-database-insights-exporter"
+
 // NewAssumeRoleCredCache builds a CredentialsCache that assumes roleARN via stsClient.
 // externalID is forwarded only when non-empty. sessionName is used for CloudTrail traceability.
 func NewAssumeRoleCredCache(stsClient stscreds.AssumeRoleAPIClient, roleARN, externalID, sessionName string) *aws.CredentialsCache {
