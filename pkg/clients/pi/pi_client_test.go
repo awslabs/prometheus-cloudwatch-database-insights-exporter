@@ -81,7 +81,7 @@ func TestNewPIClientWithSTSClient(t *testing.T) {
 
 		_, err := credCache.Retrieve(context.TODO())
 		require.NoError(t, err)
-		assert.Empty(t, mockSTS.CapturedExternalIDValue())
+		assert.False(t, mockSTS.ExternalIDWasSent(), "ExternalId must be omitted, not sent as an empty string")
 	})
 
 	t.Run("AssumeRole error is propagated through credential retrieval", func(t *testing.T) {

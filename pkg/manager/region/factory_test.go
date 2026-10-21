@@ -237,6 +237,8 @@ func TestCreateSingleRegionManagerRoleARNWiring(t *testing.T) {
 		values, err := url.ParseQuery(stsBody)
 		require.NoError(t, err)
 		assert.Equal(t, "arn:aws:iam::123456789012:role/TestRole", values.Get("RoleArn"))
+		_, externalIDSent := values["ExternalId"]
+		assert.False(t, externalIDSent, "ExternalId must be omitted when not configured")
 	})
 
 	t.Run("ExternalID from config reaches STS AssumeRole", func(t *testing.T) {

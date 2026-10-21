@@ -985,6 +985,21 @@ func TestParseRoleConfig(t *testing.T) {
 			expectedRoleARN: "arn:aws:iam::123456789012:role/mypath/CrossAccountRole",
 		},
 		{
+			name:            "European Sovereign Cloud partition is accepted",
+			config:          models.RoleConfig{ARN: "arn:aws-eusc:iam::123456789012:role/CrossAccountRole"},
+			expectedRoleARN: "arn:aws-eusc:iam::123456789012:role/CrossAccountRole",
+		},
+		{
+			name:            "isolated partition is accepted",
+			config:          models.RoleConfig{ARN: "arn:aws-iso-b:iam::123456789012:role/CrossAccountRole"},
+			expectedRoleARN: "arn:aws-iso-b:iam::123456789012:role/CrossAccountRole",
+		},
+		{
+			name:          "unknown partition returns error",
+			config:        models.RoleConfig{ARN: "arn:aws-unknown:iam::123456789012:role/CrossAccountRole"},
+			expectedError: "expected format",
+		},
+		{
 			name:          "ExternalID without role ARN returns error",
 			config:        models.RoleConfig{ExternalID: "my-external-id"},
 			expectedError: "requires discovery.role-arn to be set",
