@@ -34,7 +34,7 @@ spec:
       {{- end }}
       containers:
         - name: exporter
-          image: "{{ required "image.repository is required: the project publishes no official image yet, so build the Dockerfile at the repository root and push it somewhere your cluster can pull from" .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ required "image.repository is required: the project publishes no official image yet, so build the Dockerfile at the repository root and push it somewhere your cluster can pull from" .Values.image.repository }}:{{ required "image.tag is required: the project publishes no official image, so tag the one you built and set it here" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - -config

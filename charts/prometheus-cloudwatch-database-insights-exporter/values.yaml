@@ -3,7 +3,7 @@
 # push it somewhere your cluster can pull from, and set repository here.
 image:
   repository: ""
-  # Defaults to the chart's appVersion.
+  # Required: the project publishes no image, so there is no tag to default to.
   tag: ""
   pullPolicy: IfNotPresent
 
@@ -81,6 +81,9 @@ podSecurityContext:
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
+  # Matches the numeric user the image is built with.
+  runAsUser: 65532
+  runAsGroup: 65532
   capabilities:
     drop:
       - ALL

@@ -83,7 +83,7 @@ query parameter to narrow a scrape to specific instances.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `image.repository` | `""` | **Required.** Image to run |
-| `image.tag` | `""` | Defaults to the chart `appVersion` |
+| `image.tag` | `""` | **Required.** Tag of the image you built |
 | `image.pullPolicy` | `IfNotPresent` | |
 | `replicaCount` | `1` | Replicas each poll the API independently, so more than one multiplies API calls |
 | `config` | see `values.yaml` | Rendered into the ConfigMap |
@@ -98,7 +98,7 @@ query parameter to narrow a scrape to specific instances.
 | `serviceMonitor.scrapeTimeout` | `30s` | |
 | `resources` | `{}` | |
 | `podSecurityContext` | `runAsNonRoot`, `RuntimeDefault` | |
-| `securityContext` | read-only root, all capabilities dropped | |
+| `securityContext` | read-only root, all capabilities dropped, runs as 65532 | |
 | `livenessProbe` / `readinessProbe` | `/health` | `/health` answers without calling AWS |
 | `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints` | `{}` / `[]` | |
 | `extraVolumes`, `extraVolumeMounts` | `[]` | |

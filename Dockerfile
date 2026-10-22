@@ -24,5 +24,7 @@ COPY --from=build /out/dbinsights-exporter /usr/local/bin/dbinsights-exporter
 # Matches export.port in the default configuration.
 EXPOSE 8081
 
-USER nonroot:nonroot
+# Numeric so the kubelet can verify runAsNonRoot; it does not resolve names.
+USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/dbinsights-exporter"]
+CMD ["-config", "/etc/dbinsights/config.yml"]
