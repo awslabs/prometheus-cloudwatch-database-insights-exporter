@@ -133,3 +133,26 @@ func TestMetricDataDimensionFingerprint(t *testing.T) {
 	}
 	assert.Equal(t, "db.wait_event.type=IO", grouped.DimensionFingerprint())
 }
+
+func TestProjectDimensions(t *testing.T) {
+	keys := []string{"db.sql_tokenized.statement"}
+
+	t.Run("dimensions outside the configured keys are dropped", func(t *testing.T) {
+		projected := ProjectDimensions(map[string]string{
+			"db.sql_tokenized.statement": "SELECT 1",
+			"db.sql_tokenized.db_id":     "pi-1",
+		}, keys)
+		assert.Equal(t, map[string]string{"db.sql_tokenized.statement": "SELECT 1"}, projected)
+	})
+
+	t.Run("a missing key projects to the empty value its label carries", func(t *testing.T) {
+		projected := ProjectDimensions(map[string]string{}, keys)
+		assert.Equal(t, map[string]string{"db.sql_tokenized.statement": ""}, projected)
+	})
+
+	t.Run("entries that agree on every key share a fingerprint", func(t *testing.T) {
+		first := ProjectDimensions(map[string]string{"db.sql_tokenized.statement": "SELECT 1", "db.sql_tokenized.db_id": "pi-1"}, keys)
+		second := ProjectDimensions(map[string]string{"db.sql_tokenized.statement": "SELECT 1", "db.sql_tokenized.db_id": "pi-2"}, keys)
+		assert.Equal(t, FingerprintDimensions(first), FingerprintDimensions(second))
+	})
+}

@@ -263,6 +263,16 @@ than the ungrouped total. Exporting both under one metric name would mean either
 the total or silently under-reporting it, so the breakdown is published separately, suffixed with
 the group name. The ungrouped metric keeps the name and meaning it always had.
 
+### Entries with identical labels
+
+A series is identified by the values of its configured `keys`. Two entries of one response can
+agree on all of them, for example when `keys` lists only `db.sql_tokenized.statement` and the same
+statement ran in two databases, or when two long statements share the 500 bytes Performance
+Insights returns. Such entries are merged into one series: `avg` and `sum` values are added up,
+which is exact because load is additive. For `max` and `min` the true value of the combined series
+cannot be derived from its parts, so the larger of the two is exported, which is a lower bound.
+Adding a key that tells them apart, such as `db.sql_tokenized.id`, keeps them as separate series.
+
 ### Cost
 
 Grouping adds no API requests. `GroupBy` travels inside the `MetricQuery` it applies to, and

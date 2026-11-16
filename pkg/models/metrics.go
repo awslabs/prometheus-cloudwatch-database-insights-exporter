@@ -124,6 +124,19 @@ func FingerprintDimensions(dimensions map[string]string) string {
 	return builder.String()
 }
 
+// ProjectDimensions narrows a returned dimension set to the configured keys. A
+// key the response left out maps to the empty string, the same value its label
+// is exported with. The result identifies a grouped series: response entries
+// that agree on every configured key end up with identical labels, so they have
+// to be one series in the cache as well.
+func ProjectDimensions(dimensions map[string]string, keys []string) map[string]string {
+	projected := make(map[string]string, len(keys))
+	for _, key := range keys {
+		projected[key] = dimensions[key]
+	}
+	return projected
+}
+
 func (metric MetricDetails) GetFilterableFields() map[string]string {
 	category := DeriveMetricCategory(metric.Name)
 	return map[string]string{

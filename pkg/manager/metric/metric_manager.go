@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	awsPI "github.com/aws/aws-sdk-go-v2/service/pi"
@@ -114,6 +115,16 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 		// cache hit could only replay the aggregate.
 		returnedDimensionSets := make(map[string][]map[string]string)
 
+		// Grouped entries are keyed by their dimensions projected onto the
+		// configured keys, which is also what the labels are built from. Two
+		// entries can share that projection, for instance when they differ only
+		// in a dimension that is not a configured key, or when Performance
+		// Insights truncated two long statements to the same value. They are
+		// merged here, since exporting both would put two series with identical
+		// labels into one scrape and fail the whole /metrics response.
+		var collected []collectedSeries
+		seriesIndex := make(map[string]int)
+
 		// Process each metric from the response
 		for _, metricKeyDataPoints := range metricDataResult.MetricList {
 			if metricKeyDataPoints.Key == nil || metricKeyDataPoints.Key.Metric == nil {
@@ -122,10 +133,11 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 
 			metricName := *metricKeyDataPoints.Key.Metric
 			dimensions := metricKeyDataPoints.Key.Dimensions
-			if dimensionGroups[metricName] != nil {
-				returnedDimensionSets[metricName] = append(returnedDimensionSets[metricName], dimensions)
+			group := dimensionGroups[metricName]
+			if group != nil && len(dimensions) > 0 {
+				dimensions = models.ProjectDimensions(dimensions, group.Keys)
 			}
-			
+
 			// Get the latest 2 valid datapoints (for both latest value and dynamic TTL calculation)
 			// This is more efficient than iterating twice
 			validDataPoints := metricManager.getLatestNValidDataPoints(metricKeyDataPoints.DataPoints, 2)
@@ -139,16 +151,31 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 				Value:      *validDataPoints[0].Value,
 				Dimensions: dimensions,
 			}
-			if group := dimensionGroups[metricName]; group != nil && len(dimensions) > 0 {
+			if group != nil && len(dimensions) > 0 {
 				metricDatum.DimensionGroup = group.Group
 				metricDatum.DimensionKeys = group.Keys
 			}
 
 			// Calculate dynamic TTL from the valid datapoints (requires at least 2)
 			dynamicTTL := metricManager.calculateDynamicTTL(validDataPoints)
-			
+
+			seriesKey := metricName + "\x00" + metricDatum.DimensionFingerprint()
+			if position, seen := seriesIndex[seriesKey]; seen {
+				metricManager.mergeSeries(instance, &collected[position], metricDatum, dynamicTTL)
+				continue
+			}
+			seriesIndex[seriesKey] = len(collected)
+			collected = append(collected, collectedSeries{datum: metricDatum, ttl: dynamicTTL})
+		}
+
+		for _, series := range collected {
+			metricDatum := series.datum
+			if dimensionGroups[metricDatum.Metric] != nil {
+				returnedDimensionSets[metricDatum.Metric] = append(returnedDimensionSets[metricDatum.Metric], metricDatum.Dimensions)
+			}
+
 			// Update cache with fetched value and dynamic TTL
-			metricManager.updateCacheWithDynamicTTL(instance, metricDatum, dynamicTTL)
+			metricManager.updateCacheWithDynamicTTL(instance, metricDatum, series.ttl)
 
 			if err := formatting.ConvertToPrometheusMetric(ch, instance, metricDatum, metricManager.configuration.Export.Prometheus.MetricPrefix); err != nil {
 				log.Printf("[METRIC MANAGER] Error converting metric data to prometheus metric: %v, error: %v", metricDatum, err)
@@ -346,6 +373,41 @@ func (metricManager *MetricManager) filterCachedMetrics(instance models.Instance
 	}
 
 	return metricsToFetch, cachedMetrics
+}
+
+// collectedSeries is one series of a response, held back until every entry of
+// the response has been seen so that entries with the same labels can be merged.
+type collectedSeries struct {
+	datum models.MetricData
+	ttl   time.Duration
+}
+
+// mergeSeries folds a response entry into the series already collected under the
+// same labels.
+//
+// Load is additive across dimensions, so averages and sums add up. The max or
+// min of a sum cannot be derived from the max or min of its parts, but load is
+// never negative, so the sum is at least as large as either part and the larger
+// value is the closest lower bound available.
+func (metricManager *MetricManager) mergeSeries(instance models.Instance, series *collectedSeries, metricDatum models.MetricData, ttl time.Duration) {
+	switch models.Statistic(metricManager.extractStatistic(metricDatum.Metric)) {
+	case models.StatisticAvg, models.StatisticSum:
+		series.datum.Value += metricDatum.Value
+	default:
+		series.datum.Value = math.Max(series.datum.Value, metricDatum.Value)
+	}
+
+	if metricDatum.Timestamp.After(series.datum.Timestamp) {
+		series.datum.Timestamp = metricDatum.Timestamp
+	}
+	if ttl > 0 && (series.ttl == 0 || ttl < series.ttl) {
+		series.ttl = ttl
+	}
+
+	if utils.IsDebugEnabled() {
+		log.Printf("[DEBUG] Merged response entries with identical labels: instance=%s, metric=%s, dimensions=%s",
+			instance.Identifier, metricDatum.Metric, metricDatum.DimensionFingerprint())
+	}
 }
 
 // dimensionGroupsFor maps each metric that is configured to be broken down to
