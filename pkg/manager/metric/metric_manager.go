@@ -102,7 +102,7 @@ func (metricManager *MetricManager) CollectMetricsForBatch(ctx context.Context, 
 				instance.Identifier, len(metricsToFetch), len(metricsBatch))
 		}
 
-		dimensionGroups := metricManager.dimensionGroupsFor(metricsToFetch)
+		dimensionGroups := metricManager.dimensionGroupsFor(instance, metricsToFetch)
 
 		metricDataResult, err := metricManager.getMetricData(ctx, instance.ResourceID, metricsToFetch, dimensionGroups)
 		if err != nil {
@@ -231,7 +231,60 @@ func (metricManager *MetricManager) getMetrics(ctx context.Context, resourceID s
 		metrics.MetricsList = filteredMetricList
 		metrics.MetricsLastUpdated = time.Now()
 	}
+
+	if len(metricManager.configuration.Discovery.Metrics.DimensionGroups) > 0 &&
+		(metrics.DimensionsLastUpdated.IsZero() || time.Now().After(metrics.DimensionsLastUpdated.Add(metrics.MetadataTTL))) {
+		metricManager.refreshAvailableDimensions(ctx, resourceID, metrics)
+	}
+
 	return metrics.MetricsList, nil
+}
+
+// refreshAvailableDimensions looks up which dimension groups the instance
+// supports for every metric type a dimension rule applies to. It runs at most
+// once per metadata TTL. A failed lookup is not fatal: the affected metrics are
+// queried ungrouped until the next refresh, which is safer than sending a GroupBy
+// the engine may reject along with every metric in its request.
+func (metricManager *MetricManager) refreshAvailableDimensions(ctx context.Context, resourceID string, metrics *models.Metrics) {
+	metricConfig := &metricManager.configuration.Discovery.Metrics
+
+	metricTypes := make(map[string]struct{})
+	for _, metricNameWithStat := range metrics.MetricsList {
+		if metricConfig.DimensionGroupFor(metricNameWithStat) != nil {
+			metricTypes[utils.TrimStatisticFromMetricName(metricNameWithStat)] = struct{}{}
+		}
+	}
+
+	availableDimensions := make(map[string]models.DimensionGroupAvailability, len(metricTypes))
+	for metricType := range metricTypes {
+		availability, err := utils.WithRetry(ctx, func() (models.DimensionGroupAvailability, error) {
+			return metricManager.piService.ListAvailableResourceDimensions(ctx, resourceID, metricType)
+		}, MaxRetries, BaseDelay)
+		if err != nil {
+			log.Printf("[METRIC MANAGER] Error listing available dimensions for instance: %s, metric: %s, querying it ungrouped: %v", resourceID, metricType, err)
+			continue
+		}
+		availableDimensions[metricType] = availability
+
+		reported := make(map[*models.ParsedDimensionGroup]struct{})
+		for _, metricNameWithStat := range metrics.MetricsList {
+			if utils.TrimStatisticFromMetricName(metricNameWithStat) != metricType {
+				continue
+			}
+			group := metricConfig.DimensionGroupFor(metricNameWithStat)
+			if group == nil || availability.Supports(group.Group, group.Keys) {
+				continue
+			}
+			if _, done := reported[group]; done {
+				continue
+			}
+			reported[group] = struct{}{}
+			log.Printf("[METRIC MANAGER] Dimension group %s with keys %v is not available for instance: %s, metric: %s, querying it ungrouped", group.Group, group.Keys, resourceID, metricType)
+		}
+	}
+
+	metrics.AvailableDimensions = availableDimensions
+	metrics.DimensionsLastUpdated = time.Now()
 }
 
 func (metricManager *MetricManager) getAvailableMetrics(ctx context.Context, resourceID string, engine models.Engine) (map[string]models.MetricDetails, error) {
@@ -326,7 +379,7 @@ func (metricManager *MetricManager) filterCachedMetrics(instance models.Instance
 		// A grouped metric is cached as several series, one per dimension set the
 		// last response carried. It can only be served from cache when every one
 		// of them is still fresh, otherwise the metric is refetched as a whole.
-		if metricManager.configuration.Discovery.Metrics.DimensionGroupFor(metricNameWithStat) != nil {
+		if metricManager.dimensionGroupFor(instance, metricNameWithStat) != nil {
 			replayed, complete := metricManager.cachedDimensionSeries(instance, metricNameWithStat, statistic)
 			if complete {
 				cachedMetrics = append(cachedMetrics, replayed...)
@@ -410,13 +463,27 @@ func (metricManager *MetricManager) mergeSeries(instance models.Instance, series
 	}
 }
 
-// dimensionGroupsFor maps each metric that is configured to be broken down to
+// dimensionGroupFor returns the dimension group a metric is broken down by on
+// this instance, or nil when no rule matches or the instance does not support
+// the matching rule's group and keys.
+func (metricManager *MetricManager) dimensionGroupFor(instance models.Instance, metricNameWithStat string) *models.ParsedDimensionGroup {
+	group := metricManager.configuration.Discovery.Metrics.DimensionGroupFor(metricNameWithStat)
+	if group == nil {
+		return nil
+	}
+	if !instance.Metrics.SupportsDimensionGroup(utils.TrimStatisticFromMetricName(metricNameWithStat), group.Group, group.Keys) {
+		return nil
+	}
+	return group
+}
+
+// dimensionGroupsFor maps each metric that is broken down on this instance to
 // its dimension group. Metrics absent from the result are queried ungrouped.
-func (metricManager *MetricManager) dimensionGroupsFor(metricNamesWithStat []string) map[string]*models.ParsedDimensionGroup {
+func (metricManager *MetricManager) dimensionGroupsFor(instance models.Instance, metricNamesWithStat []string) map[string]*models.ParsedDimensionGroup {
 	var dimensionGroups map[string]*models.ParsedDimensionGroup
 
 	for _, metricNameWithStat := range metricNamesWithStat {
-		group := metricManager.configuration.Discovery.Metrics.DimensionGroupFor(metricNameWithStat)
+		group := metricManager.dimensionGroupFor(instance, metricNameWithStat)
 		if group == nil {
 			continue
 		}
@@ -442,7 +509,7 @@ func (metricManager *MetricManager) cachedDimensionSeries(instance models.Instan
 		return nil, false
 	}
 
-	group := metricManager.configuration.Discovery.Metrics.DimensionGroupFor(metricNameWithStat)
+	group := metricManager.dimensionGroupFor(instance, metricNameWithStat)
 	replayed := make([]models.MetricData, 0, len(dimensionSets))
 
 	for _, dimensions := range dimensionSets {

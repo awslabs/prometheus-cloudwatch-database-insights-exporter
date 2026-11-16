@@ -11,4 +11,5 @@ import (
 type PIService interface {
 	ListAvailableResourceMetrics(ctx context.Context, resourceID string) (*pi.ListAvailableResourceMetricsOutput, error)
 	GetResourceMetrics(ctx context.Context, resourceID string, metricNames []string, dimensionGroups map[string]*models.ParsedDimensionGroup) (*pi.GetResourceMetricsOutput, error)
+	ListAvailableResourceDimensions(ctx context.Context, resourceID string, metricType string) (models.DimensionGroupAvailability, error)
 }

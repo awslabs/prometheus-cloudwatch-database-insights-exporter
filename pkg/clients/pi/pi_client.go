@@ -67,6 +67,46 @@ func (piClient *PIClient) ListAvailableResourceMetrics(ctx context.Context, reso
 	return result, nil
 }
 
+// ListAvailableResourceDimensions returns the dimension groups the resource
+// supports for one metric type, such as db.load, following every page.
+func (piClient *PIClient) ListAvailableResourceDimensions(ctx context.Context, resourceID string, metricType string) (models.DimensionGroupAvailability, error) {
+	input := &pi.ListAvailableResourceDimensionsInput{
+		Identifier:  aws.String(resourceID),
+		Metrics:     []string{metricType},
+		ServiceType: types.ServiceTypeRds,
+	}
+
+	availability := make(models.DimensionGroupAvailability)
+	paginator := pi.NewListAvailableResourceDimensionsPaginator(piClient.client, input)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			log.Printf("[LIST_AVAILABLE_RESOURCE_DIMENSIONS] Error listing available dimensions for resourceID: %s, metric: %s, error: %v", resourceID, metricType, err)
+			return nil, err
+		}
+
+		for _, metricDimensions := range page.MetricDimensions {
+			for _, group := range metricDimensions.Groups {
+				if group.Group == nil {
+					continue
+				}
+				dimensions, found := availability[*group.Group]
+				if !found {
+					dimensions = make(map[string]struct{})
+					availability[*group.Group] = dimensions
+				}
+				for _, dimension := range group.Dimensions {
+					if dimension.Identifier != nil {
+						dimensions[*dimension.Identifier] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	return availability, nil
+}
+
 // buildMetricQueries turns metric names into API queries, attaching a GroupBy to
 // the ones configured to be broken down.
 func buildMetricQueries(metricNames []string, dimensionGroups map[string]*models.ParsedDimensionGroup) []types.MetricQuery {

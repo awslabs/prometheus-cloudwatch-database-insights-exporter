@@ -22,6 +22,7 @@ As of Q4 2025, the exporter remains under active development. Current filtering 
   - `rds:DescribeDBInstances`
   - `pi:ListAvailableResourceMetrics`
   - `pi:GetResourceMetrics`
+  - `pi:ListAvailableResourceDimensions` (only when [dimension breakdowns](#dimension-breakdowns) are configured)
 
 ## Quick Start
 
@@ -255,6 +256,13 @@ dbi_pg_db_load_avg_by_db_wait_event{identifier="prod-db-1",db_wait_event_type="C
 
 Rules are evaluated in order and the first matching one wins. Omitting the section leaves every
 metric ungrouped, which is the default.
+
+Some groups exist only for some engines, `db.application` for example only for PostgreSQL. Before
+grouping, the exporter asks each instance which groups and dimensions it offers, through
+`ListAvailableResourceDimensions`, and refreshes the answer with the metric metadata. A rule whose
+group or keys an instance does not offer is skipped for that instance with a warning, and its
+metrics are exported ungrouped. If the lookup itself fails, for example because the permission is
+missing, the instance's metrics are exported ungrouped and the error is logged.
 
 ### Why grouped series get their own metric name
 

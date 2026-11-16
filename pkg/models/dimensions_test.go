@@ -156,3 +156,17 @@ func TestProjectDimensions(t *testing.T) {
 		assert.Equal(t, FingerprintDimensions(first), FingerprintDimensions(second))
 	})
 }
+
+func TestSupportsDimensionGroup(t *testing.T) {
+	metrics := &Metrics{AvailableDimensions: map[string]DimensionGroupAvailability{
+		"db.load": {"db.wait_event": {"db.wait_event.type": {}, "db.wait_event.name": {}}},
+	}}
+
+	assert.True(t, metrics.SupportsDimensionGroup("db.load", "db.wait_event", []string{"db.wait_event.type", "db.wait_event.name"}))
+	assert.False(t, metrics.SupportsDimensionGroup("db.load", "db.wait_event", []string{"db.wait_event.id"}), "a key the group does not offer")
+	assert.False(t, metrics.SupportsDimensionGroup("db.load", "db.application", []string{"db.application.name"}), "a group the engine does not offer")
+	assert.False(t, metrics.SupportsDimensionGroup("db.sampledload", "db.wait_event", []string{"db.wait_event.type"}), "a metric type that was not looked up")
+
+	var unknown *Metrics
+	assert.False(t, unknown.SupportsDimensionGroup("db.load", "db.wait_event", []string{"db.wait_event.type"}))
+}

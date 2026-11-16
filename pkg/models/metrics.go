@@ -20,6 +20,41 @@ type Metrics struct {
 	//
 	// It is a pointer so that Metrics stays copyable.
 	DimensionSeries *DimensionSeriesStore
+
+	// AvailableDimensions holds, per metric type such as db.load, the dimension
+	// groups the instance supports. Some groups exist only for some engines, and
+	// a GroupBy the engine does not support fails every metric in its request.
+	// A metric type that is missing has not been looked up, or the lookup
+	// failed, and its metrics are queried ungrouped.
+	AvailableDimensions   map[string]DimensionGroupAvailability
+	DimensionsLastUpdated time.Time
+}
+
+// DimensionGroupAvailability maps a dimension group to the dimensions it offers.
+type DimensionGroupAvailability map[string]map[string]struct{}
+
+// Supports reports whether the group exists and offers every one of the keys.
+func (availability DimensionGroupAvailability) Supports(group string, keys []string) bool {
+	dimensions, found := availability[group]
+	if !found {
+		return false
+	}
+	for _, key := range keys {
+		if _, offered := dimensions[key]; !offered {
+			return false
+		}
+	}
+	return true
+}
+
+// SupportsDimensionGroup reports whether metrics of the given type can be
+// queried with the group and keys on this instance.
+func (metrics *Metrics) SupportsDimensionGroup(metricType string, group string, keys []string) bool {
+	if metrics == nil {
+		return false
+	}
+	availability, found := metrics.AvailableDimensions[metricType]
+	return found && availability.Supports(group, keys)
 }
 
 // DimensionSeriesStore remembers which dimension sets a grouped metric returned.

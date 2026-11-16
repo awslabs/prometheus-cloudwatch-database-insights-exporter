@@ -2,6 +2,7 @@ package metric
 
 import (
 	"context"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -45,9 +46,27 @@ func dbLoadInstance() models.Instance {
 		MetricsDetails: map[string]models.MetricDetails{
 			"db.load": testutils.NewTestMetricDetails("db.load", "Database load", "Average Active Sessions"),
 		},
-		MetadataTTL:     testutils.TestTTL,
-		DimensionSeries: models.NewDimensionSeriesStore(),
+		MetricsList:        []string{"db.load.avg"},
+		MetricsLastUpdated: time.Now(),
+		MetadataTTL:        testutils.TestTTL,
+		DimensionSeries:    models.NewDimensionSeriesStore(),
 	}
+	return instance
+}
+
+func sqlTokenizedAvailability() models.DimensionGroupAvailability {
+	return models.DimensionGroupAvailability{
+		"db.sql_tokenized": {statementKey: {}, dbIDKey: {}, "db.sql_tokenized.id": {}},
+		"db.wait_event":    {"db.wait_event.type": {}, "db.wait_event.name": {}},
+	}
+}
+
+// supportedInstance is a dbLoadInstance whose dimension lookup already ran and
+// found the tokenized SQL group.
+func supportedInstance() models.Instance {
+	instance := dbLoadInstance()
+	instance.Metrics.AvailableDimensions = map[string]models.DimensionGroupAvailability{"db.load": sqlTokenizedAvailability()}
+	instance.Metrics.DimensionsLastUpdated = time.Now()
 	return instance
 }
 
@@ -119,7 +138,7 @@ func TestCollidingDimensionsAreMergedIntoOneSeries(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.metric, func(t *testing.T) {
-			instance := dbLoadInstance()
+			instance := supportedInstance()
 			batch := []string{testCase.metric}
 
 			mockPI := &mocks.MockPIService{}
@@ -141,7 +160,7 @@ func TestCollidingDimensionsAreMergedIntoOneSeries(t *testing.T) {
 // The merged series is what gets cached, so a scrape served from the cache must
 // replay one series as well, not the two entries the response carried.
 func TestMergedSeriesReplayFromCacheWithoutDuplicates(t *testing.T) {
-	instance := dbLoadInstance()
+	instance := supportedInstance()
 	batch := []string{"db.load.avg"}
 
 	mockPI := &mocks.MockPIService{}
@@ -164,4 +183,106 @@ func TestMergedSeriesReplayFromCacheWithoutDuplicates(t *testing.T) {
 	assert.Len(t, sets, 2, "the aggregate and one merged series")
 
 	mockPI.AssertExpectations(t)
+}
+
+func TestDimensionLookupRunsOncePerMetadataTTL(t *testing.T) {
+	instance := dbLoadInstance()
+
+	mockPI := &mocks.MockPIService{}
+	manager, err := NewMetricManager(mockPI, sqlBreakdownConfig(), testutils.TestRegion)
+	require.NoError(t, err)
+
+	mockPI.On("ListAvailableResourceDimensions", mock.Anything, instance.ResourceID, "db.load").
+		Return(sqlTokenizedAvailability(), nil).Once()
+
+	for range 2 {
+		_, err := manager.GetMetricBatches(context.Background(), instance)
+		require.NoError(t, err)
+	}
+
+	assert.True(t, instance.Metrics.SupportsDimensionGroup("db.load", "db.sql_tokenized", []string{statementKey}))
+	mockPI.AssertExpectations(t)
+}
+
+func TestNoDimensionLookupWithoutRules(t *testing.T) {
+	instance := dbLoadInstance()
+
+	mockPI := &mocks.MockPIService{}
+	manager, err := NewMetricManager(mockPI, testutils.CreateDefaultParsedTestConfig(), testutils.TestRegion)
+	require.NoError(t, err)
+
+	_, err = manager.GetMetricBatches(context.Background(), instance)
+	require.NoError(t, err)
+
+	mockPI.AssertNotCalled(t, "ListAvailableResourceDimensions", mock.Anything, mock.Anything, mock.Anything)
+}
+
+func TestDimensionAvailabilityDecidesWhetherToGroup(t *testing.T) {
+	testCases := []struct {
+		name          string
+		availability  models.DimensionGroupAvailability
+		lookupError   error
+		expectGrouped bool
+	}{
+		{
+			name:          "group and keys available",
+			availability:  sqlTokenizedAvailability(),
+			expectGrouped: true,
+		},
+		{
+			name:         "group not offered by the engine",
+			availability: models.DimensionGroupAvailability{"db.wait_event": {"db.wait_event.type": {}}},
+		},
+		{
+			name:         "group offered without the configured key",
+			availability: models.DimensionGroupAvailability{"db.sql_tokenized": {dbIDKey: {}}},
+		},
+		{
+			name:        "lookup fails, for example without the IAM permission",
+			lookupError: errors.New("AccessDeniedException"),
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			instance := dbLoadInstance()
+			batch := []string{"db.load.avg"}
+
+			mockPI := &mocks.MockPIService{}
+			manager, err := NewMetricManager(mockPI, sqlBreakdownConfig(), testutils.TestRegion)
+			require.NoError(t, err)
+
+			var availability any
+			if testCase.availability != nil {
+				availability = testCase.availability
+			}
+			mockPI.On("ListAvailableResourceDimensions", mock.Anything, instance.ResourceID, "db.load").
+				Return(availability, testCase.lookupError)
+			mockPI.On("GetResourceMetrics", mock.Anything, instance.ResourceID, batch).
+				Return(&awspi.GetResourceMetricsOutput{MetricList: []types.MetricKeyDataPoints{
+					loadEntry("db.load.avg", nil, 1.0, time.Now()),
+				}}, nil)
+
+			// A cancelled context stops the retries of a failed lookup after the
+			// first attempt, which keeps the test fast. The lookup is the only
+			// call that uses it, since the metric metadata is still fresh.
+			lookupContext, cancel := context.WithCancel(context.Background())
+			if testCase.lookupError != nil {
+				cancel()
+			}
+			defer cancel()
+
+			_, err = manager.GetMetricBatches(lookupContext, instance)
+			require.NoError(t, err, "a failed dimension lookup must not fail metric collection")
+
+			ch := make(chan prometheus.Metric, 10)
+			require.NoError(t, manager.CollectMetricsForBatch(context.Background(), instance, batch, ch))
+
+			if testCase.expectGrouped {
+				assert.Contains(t, mockPI.LastDimensionGroups, "db.load.avg")
+			} else {
+				assert.Empty(t, mockPI.LastDimensionGroups)
+			}
+		})
+	}
 }
