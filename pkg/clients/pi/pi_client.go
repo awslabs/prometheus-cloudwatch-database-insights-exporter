@@ -29,6 +29,13 @@ func NewPIClient(region string) (*PIClient, error) {
 	return NewPIClientWithEndpoint(region, "")
 }
 
+// NewPIClientFromConfig creates a PI client from a pre-configured aws.Config.
+// Use this when credentials (e.g. assumed-role) are set up externally, such as
+// by the factory, so that multiple clients can share a single CredentialsCache.
+func NewPIClientFromConfig(cfg aws.Config) *PIClient {
+	return newPIClientFromConfig(cfg, "")
+}
+
 func NewPIClientWithEndpoint(region, endpoint string) (*PIClient, error) {
 	log.Println("[PI] Creating new PI client...")
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
@@ -37,6 +44,11 @@ func NewPIClientWithEndpoint(region, endpoint string) (*PIClient, error) {
 		return nil, err
 	}
 
+	log.Printf("[PI] AWS config loaded, region: %s", cfg.Region)
+	return newPIClientFromConfig(cfg, endpoint), nil
+}
+
+func newPIClientFromConfig(cfg aws.Config, endpoint string) *PIClient {
 	client := pi.NewFromConfig(cfg)
 	if endpoint != "" {
 		client = pi.NewFromConfig(cfg, func(o *pi.Options) {
@@ -44,11 +56,7 @@ func NewPIClientWithEndpoint(region, endpoint string) (*PIClient, error) {
 		})
 		log.Printf("[PI] Using custom endpoint: %s", endpoint)
 	}
-
-	log.Printf("[PI] AWS config loaded, region: %s", region)
-	return &PIClient{
-		client: client,
-	}, nil
+	return &PIClient{client: client}
 }
 
 func (piClient *PIClient) ListAvailableResourceMetrics(ctx context.Context, resourceID string) (*pi.ListAvailableResourceMetricsOutput, error) {

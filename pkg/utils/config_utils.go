@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/filter"
 	"github.com/awslabs/prometheus-cloudwatch-database-insights-exporter/pkg/models"
@@ -31,6 +32,16 @@ const (
 	MinCacheMaxSize       = 1
 	ValidPrometheusName   = `^[a-zA-Z_:][a-zA-Z0-9_:]*$`
 )
+
+// validRoleARNPattern accepts exactly the AWS partitions known to the SDK: aws, aws-cn,
+// aws-us-gov, aws-eusc, and the isolated aws-iso* partitions. The role name/path segment
+// uses IAM-allowed characters [\w+=,.@/-]. The {1,1000} upper bound is deliberately
+// generous; the empty-name guard below catches trailing slashes.
+var validRoleARNPattern = regexp.MustCompile(`^arn:(aws|aws-cn|aws-us-gov|aws-eusc|aws-iso|aws-iso-b|aws-iso-e|aws-iso-f):iam::\d{12}:role/[\w+=,.@/\-]{1,1000}$`)
+
+// validExternalIDPattern matches the character class of the AWS STS ExternalId constraint: [\w+=,.@:/-].
+// Length (2-1224) is checked separately because Go's RE2 engine caps repeat counts at 1000.
+var validExternalIDPattern = regexp.MustCompile(`^[\w+=,.@:/\-]+$`)
 
 func LoadConfig(filePath string) (*models.ParsedConfig, error) {
 	data, err := ioutil.ReadFile(filePath)
@@ -147,6 +158,12 @@ func parsedValidateConfig(config *models.Config) (*models.ParsedConfig, error) {
 
 	parsedConfig.Discovery.Processing = parseProcessingConfig(config.Discovery.Processing)
 
+	roleConfig, err := parseRoleConfig(config.Discovery.Role)
+	if err != nil {
+		return nil, err
+	}
+	parsedConfig.Discovery.Role = roleConfig
+
 	exportConfig, err := parseExportConfig(config.Export)
 	if err != nil {
 		return nil, err
@@ -154,6 +171,48 @@ func parsedValidateConfig(config *models.Config) (*models.ParsedConfig, error) {
 	parsedConfig.Export = exportConfig
 
 	return &parsedConfig, nil
+}
+
+// parseRoleConfig validates the optional cross-account role settings.
+// Both fields of the result are empty when no role is configured.
+func parseRoleConfig(config models.RoleConfig) (models.ParsedRoleConfig, error) {
+	roleARN := config.ARN
+	externalID := config.ExternalID
+
+	if roleARN == "" {
+		if externalID != "" {
+			return models.ParsedRoleConfig{}, fmt.Errorf("discovery.role-arn-external-id requires discovery.role-arn to be set")
+		}
+		return models.ParsedRoleConfig{}, nil
+	}
+
+	if !validRoleARNPattern.MatchString(roleARN) {
+		return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn %q: expected format arn:aws*:iam::<12-digit-account>:role/<name>", roleARN)
+	}
+	// SplitN on the structural ":role/" prefix. IAM role names themselves cannot
+	// contain "/", so the last slash-delimited segment is always the role name.
+	rolePathAndName := strings.SplitN(roleARN, ":role/", 2)[1]
+	roleName := rolePathAndName
+	if i := strings.LastIndex(rolePathAndName, "/"); i >= 0 {
+		roleName = rolePathAndName[i+1:]
+	}
+	if roleName == "" {
+		return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn %q: role name segment must not be empty", roleARN)
+	}
+	if utf8.RuneCountInString(roleName) > 64 {
+		return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn: role name %q exceeds the AWS 64-character limit", roleName)
+	}
+
+	if externalID != "" {
+		if l := utf8.RuneCountInString(externalID); l < 2 || l > 1224 {
+			return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn-external-id: length must be 2-1224 characters (got %d)", l)
+		}
+		if !validExternalIDPattern.MatchString(externalID) {
+			return models.ParsedRoleConfig{}, fmt.Errorf("invalid discovery.role-arn-external-id: must contain only [a-zA-Z0-9_+=,.@:/-]")
+		}
+	}
+
+	return models.ParsedRoleConfig{ARN: roleARN, ExternalID: externalID}, nil
 }
 
 func getAllValidFilterFields() map[string]bool {
