@@ -23,6 +23,7 @@ As of Q4 2025, the exporter remains under active development. Current filtering 
   - `pi:ListAvailableResourceMetrics`
   - `pi:GetResourceMetrics`
   - `pi:ListAvailableResourceDimensions` (only when [dimension breakdowns](#dimension-breakdowns) are configured)
+  - `sts:AssumeRole` (only when using cross-account `role-arn`)
 
 ## Quick Start
 
@@ -115,6 +116,8 @@ The file is written in YAML format:
 discovery:
   regions:
     - "us-west-2"
+  role-arn: "arn:aws:iam::123456789012:role/pi-exporter-role"  # optional: assume role for cross-account access
+  role-arn-external-id: "my-external-id"                       # optional: ExternalID for confused-deputy mitigation
   instances:
     max-instances: 25
     cache:
@@ -157,6 +160,8 @@ Controls how the exporter discovers and monitors RDS/Aurora instances.
 | Field | Type | Required/Optional | Default | Description |
 |-------|------|------------------|---------|-------------|
 | `regions` | array | Required | `["us-west-2"]` | List of AWS regions to scan for RDS/Aurora instances. **Note**: Only the first region is currently used (single-region support only) |
+| `role-arn` | string | Optional | `""` | IAM role ARN to assume before calling AWS APIs. Use for cross-account access. The exporter's own IAM identity (e.g., IRSA service account) must have `sts:AssumeRole` permission on this role. If empty, the default credential chain is used. Format: `arn:<partition>:iam::<12-digit-account>:role/<name>`, where `<partition>` is one of `aws`, `aws-cn`, `aws-us-gov`, `aws-eusc`, `aws-iso`, `aws-iso-b`, `aws-iso-e`, `aws-iso-f`. Role name segment must not exceed 64 characters. |
+| `role-arn-external-id` | string | Optional | `""` | ExternalID condition for the AssumeRole call (confused-deputy mitigation). Only valid when `role-arn` is also set. Must match the `sts:ExternalId` condition in the target account's trust policy. Must be 2–1224 characters. Allowed characters: `[a-zA-Z0-9_+=,.@:/-]`. |
 | `instances.max-instances` | integer | Optional | `25` | Maximum number of instances to monitor (accepted range: 1–10,000; values above 10,000 are capped at 10,000). When this limit is exceeded, only the oldest `max-instances` are selected |
 | `instances.cache.ttl` | string | Optional | `"5m"` | Time-to-live for cached instance discovery results. How long to cache the list of RDS/Aurora instances before re-discovering |
 | `instances.include` | map | Optional | `{}` | Map of field names to regex pattern arrays for instance filtering (allowlist mode). Supported fields: `identifier`, `engine`, `tag.<TagKey>` (e.g., `tag.Environment`, `tag.Team`) |
@@ -721,6 +726,103 @@ scrape_configs:
       identifiers: ['prod-db-1,prod-db-2']
 ```
 
+## Cross-Account Access
+
+By default the exporter uses the credential chain of the process that runs it (environment variables, EC2 instance profile, EKS IRSA, etc.) to call RDS and Performance Insights APIs. When your RDS instances live in a **different AWS account** from where the exporter runs, configure `discovery.role-arn` to have the exporter assume a role in the target account before making any API calls.
+
+### How it works
+
+```
+Exporter process (source account)
+  │
+  ├─ Default credential chain (IRSA, EC2 instance profile, env vars, ...)
+  │    → obtains source-account credentials
+  │
+  └─ sts:AssumeRole → target-account role
+       → rds:DescribeDBInstances  (instance discovery)
+       → pi:GetResourceMetrics    (metric collection)
+       → pi:ListAvailableResourceMetrics
+```
+
+Credentials are cached in-process and refreshed automatically before expiry — no pod restarts needed.
+
+### IAM setup
+
+**Source account** — the exporter's identity (IRSA role / instance profile) needs:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "sts:AssumeRole",
+    "Resource": "arn:aws:iam::<target-account-id>:role/<role-name>"
+  }]
+}
+```
+
+**Target account** — create a role with:
+
+*Trust policy* (allows the source identity to assume it; see [ExternalID](#confused-deputy-protection-externalid) if the role is shared):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "AWS": "arn:aws:iam::<source-account-id>:role/<exporter-role>" },
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+*Permissions policy*:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "rds:DescribeDBInstances",
+      "pi:ListAvailableResourceMetrics",
+      "pi:GetResourceMetrics"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+### Configuration
+
+```yaml
+discovery:
+  regions:
+    - "eu-central-1"
+  role-arn: "arn:aws:iam::123456789012:role/pi-exporter-cross-account"
+```
+
+### Confused-deputy protection (ExternalID)
+
+Set `role-arn-external-id` whenever the target role's trust policy has an `sts:ExternalId` condition, either because the target account requires one or to guard against confused-deputy access when several parties can assume the role. The value must match the condition exactly:
+
+```json
+"Condition": { "StringEquals": { "sts:ExternalId": "my-unique-id" } }
+```
+
+```yaml
+discovery:
+  role-arn: "arn:aws:iam::123456789012:role/pi-exporter-cross-account"
+  role-arn-external-id: "my-unique-id"
+```
+
+### Error behaviour
+
+Credentials are resolved lazily — the exporter starts successfully even if the role cannot be assumed. The error surfaces on the first `/metrics` scrape and is logged per-scrape until the IAM configuration is fixed.
+
+While the role cannot be assumed:
+- `/health` still returns `ok`, and `/metrics` still returns HTTP 200, so Prometheus reports `up == 1`.
+- `dbi_*` series stop once the in-memory metric cache expires (about a minute with the default dynamic TTL, longer if `pattern-ttls` are set). Until then, previously cached values are still served.
+
+`up` alone therefore does not detect a broken role. Alert on the absence of `dbi_*` series while the target is up, for example `up{job="<exporter-job>"} == 1 unless on(instance) count by (instance) ({__name__=~"dbi_.+"})`, and check the exporter logs for `AccessDenied`.
+
 ## Building & Development
 
 ### Build Commands
@@ -756,7 +858,7 @@ make coverage-html  # Generate test coverage report
 curl http://localhost:8081/metrics
 
 # Health check
-curl -I http://localhost:8081/metrics
+curl http://localhost:8081/health
 ```
 
 ## Prometheus Server Setup

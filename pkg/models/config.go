@@ -17,6 +17,7 @@ type DiscoveryConfig struct {
 	Instances  InstancesConfig
 	Metrics    MetricsConfig
 	Processing ProcessingConfig
+	Role       RoleConfig `yaml:",inline"`
 }
 
 type ExportConfig struct {
@@ -25,10 +26,10 @@ type ExportConfig struct {
 }
 
 type InstancesConfig struct {
-	MaxInstances int                `yaml:"max-instances"`
+	MaxInstances int                  `yaml:"max-instances"`
 	Cache        InstancesCacheConfig `yaml:"cache,omitempty"`
-	Include      FilterConfig       `yaml:"include,omitempty"`
-	Exclude      FilterConfig       `yaml:"exclude,omitempty"`
+	Include      FilterConfig         `yaml:"include,omitempty"`
+	Exclude      FilterConfig         `yaml:"exclude,omitempty"`
 }
 
 type InstancesCacheConfig struct {
@@ -66,6 +67,13 @@ type ProcessingConfig struct {
 	Concurrency int
 }
 
+// RoleConfig holds the optional cross-account role settings. It is inlined into
+// DiscoveryConfig, so the keys sit directly under discovery in the YAML file.
+type RoleConfig struct {
+	ARN        string `yaml:"role-arn,omitempty"`
+	ExternalID string `yaml:"role-arn-external-id,omitempty"`
+}
+
 type PrometheusConfig struct {
 	MetricPrefix string `yaml:"metric-prefix"`
 }
@@ -93,6 +101,7 @@ type ParsedDiscoveryConfig struct {
 	Instances  ParsedInstancesConfig
 	Metrics    ParsedMetricsConfig
 	Processing ParsedProcessingConfig
+	Role       ParsedRoleConfig
 }
 
 type ParsedExportConfig struct {
@@ -138,6 +147,11 @@ func (config *ParsedMetricsConfig) DimensionGroupFor(metricName string) *ParsedD
 
 type ParsedProcessingConfig struct {
 	Concurrency int
+}
+
+type ParsedRoleConfig struct {
+	ARN        string
+	ExternalID string
 }
 
 type ParsedPrometheusConfig struct {

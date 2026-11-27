@@ -4,7 +4,15 @@
 discovery:
   regions:
     - us-west-2
-  
+
+  # Optional: Cross-account access
+  # Assume this IAM role before calling RDS and Performance Insights APIs.
+  # If unset, the default credential chain (IRSA, EC2 instance profile, env vars, ...) is used.
+  role-arn: "arn:aws:iam::123456789012:role/pi-exporter-cross-account"
+  # Optional: ExternalID sent on AssumeRole (confused-deputy mitigation).
+  # Must match the sts:ExternalId condition in the target role's trust policy. Requires role-arn.
+  role-arn-external-id: "my-unique-id"
+
   instances:
     max-instances: 25
     cache:
