@@ -1,0 +1,17 @@
+apiVersion: v2
+name: prometheus-cloudwatch-database-insights-exporter
+description: Prometheus exporter for Amazon CloudWatch Database Insights (RDS/Aurora Performance Insights)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/awslabs/prometheus-cloudwatch-database-insights-exporter
+sources:
+  - https://github.com/awslabs/prometheus-cloudwatch-database-insights-exporter
+keywords:
+  - prometheus
+  - exporter
+  - aws
+  - rds
+  - aurora
+  - performance-insights
+  - database-insights

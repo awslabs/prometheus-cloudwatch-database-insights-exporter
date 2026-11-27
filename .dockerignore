@@ -1,0 +1,9 @@
+.git
+.github
+charts
+*.md
+!README.md
+Makefile
+coverage.out
+coverage.html
+dbinsights-exporter
