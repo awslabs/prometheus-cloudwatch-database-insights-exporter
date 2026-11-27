@@ -22,10 +22,18 @@ func ConvertToPrometheusMetric(ch chan<- prometheus.Metric, instance models.Inst
 	}
 
 	metricLabels := []string{"identifier", "engine", "unit"}
+	labelValues := []string{instance.Identifier, string(instance.Engine), metric.Unit}
+
+	// Label names come from the configured keys, not from the response, so every
+	// series of a grouped metric presents the same label set.
+	for _, dimensionKey := range metricData.DimensionKeys {
+		metricLabels = append(metricLabels, utils.SnakeCase(dimensionKey))
+		labelValues = append(labelValues, metricData.Dimensions[dimensionKey])
+	}
 
 	engineShortStr := utils.EngineToShortName(instance.Engine)
 	prometheusDesc := buildPrometheusDescription(
-		buildPrometheusMetricName(metricPrefix, engineShortStr, metricData.Metric),
+		buildPrometheusMetricName(metricPrefix, engineShortStr, metricData.Metric, metricData.DimensionGroup),
 		metric.Description,
 		metricLabels,
 	)
@@ -34,9 +42,7 @@ func ConvertToPrometheusMetric(ch chan<- prometheus.Metric, instance models.Inst
 		prometheusDesc,
 		prometheus.GaugeValue,
 		metricData.Value,
-		instance.Identifier,
-		string(instance.Engine),
-		metric.Unit,
+		labelValues...,
 	)
 	if err != nil {
 		return err
@@ -72,9 +78,21 @@ func buildPrometheusDescription(metricNameWithStat string, metricDescription str
 	)
 }
 
-func buildPrometheusMetricName(metricPrefix string, engineShortStr string, metricWithStatistic string) string {
+// buildPrometheusMetricName names the exported series. Series broken down by a
+// dimension group get their own metric name, suffixed with the group.
+//
+// They deliberately do not share a name with the ungrouped metric: GroupBy.Limit
+// returns the top N dimensions and adds no "other" bucket, so the breakdown can
+// sum to less than the total. Keeping them apart means neither double counts nor
+// silently under-reports.
+func buildPrometheusMetricName(metricPrefix string, engineShortStr string, metricWithStatistic string, dimensionGroup string) string {
 	if strings.HasPrefix(metricWithStatistic, "db.") {
 		metricPrefix = metricPrefix + "_" + engineShortStr
 	}
-	return metricPrefix + "_" + utils.SnakeCase(metricWithStatistic)
+
+	name := metricPrefix + "_" + utils.SnakeCase(metricWithStatistic)
+	if dimensionGroup != "" {
+		name = name + "_by_" + utils.SnakeCase(dimensionGroup)
+	}
+	return name
 }

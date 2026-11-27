@@ -31,7 +31,22 @@ const (
 	DefaultCacheMaxSize   = 100000
 	MinCacheMaxSize       = 1
 	ValidPrometheusName   = `^[a-zA-Z_:][a-zA-Z0-9_:]*$`
+
+	// MaxDimensionLimit mirrors the API cap on results returned for a dimension
+	// group in a single response. Going beyond it would require paginating with
+	// NextToken, which would turn one request into several.
+	MaxDimensionLimit = 25
+
+	// MaxDimensionKeys mirrors the API cap on dimensions requested in one
+	// GroupBy.
+	MaxDimensionKeys = 10
 )
+
+// dimensionKeyPrefixes lists the groups whose dimension keys do not start with
+// the group name. Every other group's keys start with the group name and a dot.
+var dimensionKeyPrefixes = map[string]string{
+	"db.query_tokenized": "db.query.tokenized.",
+}
 
 // validRoleARNPattern accepts exactly the AWS partitions known to the SDK: aws, aws-cn,
 // aws-us-gov, aws-eusc, and the isolated aws-iso* partitions. The role name/path segment
@@ -388,6 +403,11 @@ func parsedMetricsConfig(config models.MetricsConfig) (models.ParsedMetricsConfi
 		metricFilter = filter.NewPatternFilter(includePatterns, excludePatterns)
 	}
 
+	parsedDimensionGroups, err := parseDimensionGroups(config.Dimensions)
+	if err != nil {
+		return models.ParsedMetricsConfig{}, err
+	}
+
 	return models.ParsedMetricsConfig{
 		Statistic:         defaultStatistic,
 		MetadataCacheTTL:  metadataCacheTTL,
@@ -396,7 +416,93 @@ func parsedMetricsConfig(config models.MetricsConfig) (models.ParsedMetricsConfi
 		Filter:            metricFilter,
 		Include:           config.Include,
 		Exclude:           config.Exclude,
+		DimensionGroups:   parsedDimensionGroups,
 	}, nil
+}
+
+// parseDimensionGroups validates and compiles the dimension breakdown rules.
+//
+// limit is required rather than defaulted: it decides how many series each
+// instance contributes, and a silent default would make a cardinality decision
+// on the operator's behalf. It is capped at MaxDimensionLimit because the API
+// returns at most that many results in one response, and anything beyond would
+// need pagination, which would cost extra API requests.
+func parseDimensionGroups(configs []models.DimensionGroupConfig) ([]models.ParsedDimensionGroup, error) {
+	if len(configs) == 0 {
+		return nil, nil
+	}
+
+	parsed := make([]models.ParsedDimensionGroup, 0, len(configs))
+	for index, dimensionConfig := range configs {
+		pattern, err := regexp.Compile(dimensionConfig.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].pattern in config.yml: %v", index, err)
+		}
+
+		if dimensionConfig.Group == "" {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].group in config.yml: group cannot be empty", index)
+		}
+
+		if len(dimensionConfig.Keys) == 0 {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].keys in config.yml: at least one key is required", index)
+		}
+
+		if err := validateDimensionKeys(dimensionConfig.Group, dimensionConfig.Keys); err != nil {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].keys in config.yml: %v", index, err)
+		}
+
+		if dimensionConfig.Limit < 1 || dimensionConfig.Limit > MaxDimensionLimit {
+			return nil, fmt.Errorf("invalid discovery.metrics.dimensions[%d].limit in config.yml: limit must be between 1 and %d, got %d", index, MaxDimensionLimit, dimensionConfig.Limit)
+		}
+
+		parsed = append(parsed, models.ParsedDimensionGroup{
+			Pattern: pattern,
+			Group:   dimensionConfig.Group,
+			Keys:    dimensionConfig.Keys,
+			Limit:   int32(dimensionConfig.Limit),
+		})
+	}
+
+	return parsed, nil
+}
+
+// validateDimensionKeys checks the keys of one rule against what the API accepts
+// and what can be exported. A key from another group would be rejected by the
+// API on every request, and two keys mapping onto one label name would make
+// every series of the metric fail at scrape time, so both are caught at startup.
+func validateDimensionKeys(group string, keys []string) error {
+	if len(keys) > MaxDimensionKeys {
+		return fmt.Errorf("at most %d keys are allowed, got %d", MaxDimensionKeys, len(keys))
+	}
+
+	prefix, aliased := dimensionKeyPrefixes[group]
+	if !aliased {
+		prefix = group + "."
+	}
+
+	validName := regexp.MustCompile(ValidPrometheusName)
+	labelOwners := make(map[string]string, len(keys))
+
+	for _, key := range keys {
+		if !strings.HasPrefix(key, prefix) || len(key) == len(prefix) {
+			return fmt.Errorf("key '%s' does not belong to group '%s', its keys start with '%s'", key, group, prefix)
+		}
+
+		labelName := SnakeCase(key)
+		if !validName.MatchString(labelName) {
+			return fmt.Errorf("key '%s' does not map to a valid label name, got '%s'", key, labelName)
+		}
+
+		if owner, taken := labelOwners[labelName]; taken {
+			if owner == key {
+				return fmt.Errorf("key '%s' is listed more than once", key)
+			}
+			return fmt.Errorf("keys '%s' and '%s' both map to label '%s'", owner, key, labelName)
+		}
+		labelOwners[labelName] = key
+	}
+
+	return nil
 }
 
 func parseProcessingConfig(config models.ProcessingConfig) models.ParsedProcessingConfig {

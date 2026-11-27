@@ -104,7 +104,7 @@ func TestGetResourceMetrics(t *testing.T) {
 			mockService := &mocks.MockPIService{}
 			mockService.On("GetResourceMetrics", mock.Anything, tc.resourceID, tc.metricNames).Return(tc.mockResponse, tc.expectedError)
 
-			result, err := mockService.GetResourceMetrics(context.Background(), tc.resourceID, tc.metricNames)
+			result, err := mockService.GetResourceMetrics(context.Background(), tc.resourceID, tc.metricNames, nil)
 			if tc.expectedError != nil {
 				assert.Nil(t, result)
 				assert.Error(t, err)

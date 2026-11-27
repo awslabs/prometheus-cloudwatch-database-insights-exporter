@@ -421,7 +421,7 @@ func TestGetMetricData(t *testing.T) {
 			mockPI.On("GetResourceMetrics", mock.Anything, tc.resourceID, tc.metricNames).
 				Return(tc.mockResponse, tc.expectedError)
 
-			metricDataResult, err := manager.getMetricData(context.Background(), tc.resourceID, tc.metricNames)
+			metricDataResult, err := manager.getMetricData(context.Background(), tc.resourceID, tc.metricNames, nil)
 
 			if tc.expectedError != nil {
 				assert.Error(t, err)
